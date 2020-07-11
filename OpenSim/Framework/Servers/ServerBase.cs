@@ -140,7 +140,7 @@ namespace OpenSim.Framework.Servers
             //m_log.Info("[STARTUP]: Virtual machine runtime version: " + Environment.Version + Environment.NewLine);
             m_log.InfoFormat(
                 "[SERVER BASE]: Operating system version: {0}, .NET platform {1}, {2}-bit",
-                Environment.OSVersion, Environment.OSVersion.Platform, Util.Is64BitProcess() ? "64" : "32");
+                Environment.OSVersion, Environment.OSVersion.Platform, Environment.Is64BitProcess ? "64" : "32");
         }
 
         public void RegisterCommonAppenders(IConfig startupConfig)
@@ -684,6 +684,11 @@ namespace OpenSim.Framework.Servers
 
         private void ShowLogLevel()
         {
+            if (null == m_consoleAppender)
+            {
+                Notice("No appender named Console found (see the log4net config file for this executable)!");
+                return;
+            }
             Notice("Console log level is {0}", m_consoleAppender.Threshold);
         }
 
@@ -736,10 +741,10 @@ namespace OpenSim.Framework.Servers
         /// <returns></returns>
         protected string GetUptimeReport()
         {
-            StringBuilder sb = new StringBuilder(String.Format("Time now is {0}\n", DateTime.Now));
-            sb.Append(String.Format("Server has been running since {0}, {1}\n", m_startuptime.DayOfWeek, m_startuptime));
-            sb.Append(String.Format("That is an elapsed time of {0}\n", DateTime.Now - m_startuptime));
-
+            StringBuilder sb = new StringBuilder(512);
+            sb.AppendFormat("Time now is {0}\n", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendFormat("Server has been running since {0}, {1}\n", m_startuptime.DayOfWeek, m_startuptime.ToString("yyyy-MM-dd HH:mm:ss"));
+            sb.AppendFormat("That is an elapsed time of {0}\n", DateTime.Now - m_startuptime);
             return sb.ToString();
         }
 

@@ -29,8 +29,8 @@ namespace OpenSim
 {
     public class VersionInfo
     {
-        public const string VersionNumber = "0.9.1.1";
-        public const string AssemblyVersionNumber = "0.9.1.1";
+        public const string VersionNumber = "0.9.2.0";
+        public const string AssemblyVersionNumber = "0.9.2.0";
 
         public const Flavour VERSION_FLAVOUR = Flavour.Dev;
 
@@ -74,6 +74,10 @@ namespace OpenSim
         /// <remarks>
         /// The protocol version that we will use for outgoing transfers
         /// Valid values are
+        /// "SIMULATION/0.8"
+        ///     - up to 45 avatar textures - 11 baked
+        /// "SIMULATION/0.7"
+        ///     TP uses call back again
         /// "SIMULATION/0.3"
         ///   - supports teleports to variable-sized regions
         ///   - Older versions can teleport to this one, but only if the destination region

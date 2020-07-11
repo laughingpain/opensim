@@ -221,7 +221,9 @@ namespace OpenSim.Framework
     public delegate void AddNewPrim(
         UUID ownerID, UUID groupID, Vector3 RayEnd, Quaternion rot, PrimitiveBaseShape shape, byte bypassRaycast, Vector3 RayStart,
         UUID RayTargetID,
-        byte RayEndIsIntersection);
+        byte RayEndIsIntersection, uint addflags);
+
+    public delegate void AgentDataUpdate(IClientAPI remoteClient, UUID itemID, UUID ownerID);
 
     public delegate void RequestGodlikePowers(
         UUID AgentID, UUID SessionID, UUID token, bool GodLike);
@@ -252,7 +254,7 @@ namespace OpenSim.Framework
     public delegate void PurgeInventoryDescendents(
         IClientAPI remoteClient, UUID folderID);
 
-    public delegate void FetchInventory(IClientAPI remoteClient, UUID itemID, UUID ownerID);
+    public delegate void FetchInventory(IClientAPI remoteClient, UUID[] items, UUID[] owner);
 
     public delegate void RequestTaskInventory(IClientAPI remoteClient, uint localID);
 
@@ -846,7 +848,7 @@ namespace OpenSim.Framework
         event Action<IClientAPI> OnRequestAvatarsData;
         event AddNewPrim OnAddPrim;
 
-        event FetchInventory OnAgentDataUpdateRequest;
+        event AgentDataUpdate OnAgentDataUpdateRequest;
         event TeleportLocationRequest OnSetStartLocationRequest;
 
         event RequestGodlikePowers OnRequestGodlikePowers;
@@ -1205,10 +1207,10 @@ namespace OpenSim.Framework
         void FlushPrimUpdates();
 
         void SendInventoryFolderDetails(UUID ownerID, UUID folderID, List<InventoryItemBase> items,
-                                        List<InventoryFolderBase> folders, int version, bool fetchFolders,
-                                        bool fetchItems);
+                                        List<InventoryFolderBase> folders, int version, int descendents, 
+                                        bool fetchFolders, bool fetchItems);
 
-        void SendInventoryItemDetails(UUID ownerID, InventoryItemBase item);
+        void SendInventoryItemDetails(InventoryItemBase[] items);
 
         /// <summary>
         /// Tell the client that we have created the item it requested.
@@ -1248,7 +1250,7 @@ namespace OpenSim.Framework
                              int PricePublicObjectDelete, int PriceRentLight, int PriceUpload, int TeleportMinPrice,
                              float TeleportPriceExponent);
 
-        void SendAvatarPickerReply(AvatarPickerReplyAgentDataArgs AgentData, List<AvatarPickerReplyDataArgs> Data);
+        void SendAvatarPickerReply(UUID QueryID, List<UserData> users);
 
         void SendAgentDataUpdate(UUID agentid, UUID activegroupid, string firstname, string lastname, ulong grouppowers,
                                  string groupname, string grouptitle);
@@ -1284,20 +1286,8 @@ namespace OpenSim.Framework
         void SendDialog(string objectname, UUID objectID, UUID ownerID, string ownerFirstName, string ownerLastName, string msg, UUID textureID, int ch,
                         string[] buttonlabels);
 
-        /// <summary>
-        /// Update the client as to where the sun is currently located.
-        /// </summary>
-        /// <param name="sunPos"></param>
-        /// <param name="sunVel"></param>
-        /// <param name="CurrentTime">Seconds since Unix Epoch 01/01/1970 00:00:00</param>
-        /// <param name="SecondsPerSunCycle"></param>
-        /// <param name="SecondsPerYear"></param>
-        /// <param name="OrbitalPosition">The orbital position is given in radians, and must be "adjusted" for the linden client, see LLClientView</param>
-        void SendSunPos(Vector3 sunPos, Vector3 sunVel, ulong CurrentTime, uint SecondsPerSunCycle, uint SecondsPerYear,
-                        float OrbitalPosition);
-
+        void SendViewerTime(Vector3 sunDir, float sunphase);
         void SendViewerEffect(ViewerEffectPacket.EffectBlock[] effectBlocks);
-        void SendViewerTime(int phase);
 
         void SendAvatarProperties(UUID avatarID, string aboutText, string bornOn, Byte[] membershipType, string flAbout,
                                   uint flags, UUID flImageID, UUID imageID, string profileURL, UUID partnerID);

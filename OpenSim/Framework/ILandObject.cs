@@ -73,6 +73,7 @@ namespace OpenSim.Framework
         ILandObject Copy();
 
         void SendLandUpdateToAvatarsOverMe();
+        void SendLandUpdateToAvatars();
 
         void SendLandProperties(int sequence_id, bool snap_selection, int request_result, IClientAPI remote_client);
         bool UpdateLandProperties(LandUpdateArgs args, IClientAPI remote_client, out bool snap_selection, out bool needOverlay);
@@ -171,6 +172,8 @@ namespace OpenSim.Framework
 
         void SetParcelObjectMaxOverride(overrideParcelMaxPrimCountDelegate overrideDel);
         void SetSimulatorObjectMaxOverride(overrideSimulatorMaxPrimCountDelegate overrideDel);
+        
+        void StoreEnvironment(ViewerEnvironment VEnv);
 
         /// <summary>
         /// Set the media url for this land parcel

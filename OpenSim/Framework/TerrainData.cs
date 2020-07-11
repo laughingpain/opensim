@@ -194,9 +194,6 @@ namespace OpenSim.Framework
             return ret;
         }
 
-        // This one dimensional version is ordered so height = map[y*sizeX+x];
-        // DEPRECATED: don't use this function as it does not retain the dimensions of the terrain
-        //     and the caller will probably do the wrong thing if the terrain is not the legacy 256x256.
         public float[] GetFloatsSerialized()
         {
             int points = SizeX * SizeY;
@@ -247,7 +244,7 @@ namespace OpenSim.Framework
             }
         }
 
-        public unsafe void GetPatchBlock(float[] _block, int px, int py, float sub, float premult)
+        public unsafe void GetPatchBlock(float* block, int px, int py, float sub, float premult)
         {
             int k = 0;
             int stride = m_heightmap.GetLength(1);
@@ -255,7 +252,7 @@ namespace OpenSim.Framework
             int startX = px * 16 * stride;
             int endX = (px + 1) * 16 * stride;
             int startY = py * 16;
-            fixed(float* block = _block, map = m_heightmap)
+            fixed(float* map = m_heightmap)
             {
                 for (int y = startY; y < startY + 16; y++)
                 {
@@ -485,7 +482,8 @@ namespace OpenSim.Framework
                         for (int yy = 0; yy < SizeY; yy++)
                             for (int xx = 0; xx < SizeX; xx++)
                             {
-                                bw.Write((float)m_heightmap[xx, yy]);
+                                //bw.Write((float)m_heightmap[xx, yy]);
+                                bw.Write((float)Math.Round(m_heightmap[xx, yy], 3, MidpointRounding.AwayFromZero));
                             }
 
                         bw.Flush();

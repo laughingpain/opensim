@@ -157,6 +157,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         internal TaskInventoryItem m_item;
         protected IUrlModule m_UrlModule = null;
         protected ISoundModule m_SoundModule = null;
+        protected IEnvironmentModule m_envModule = null;
 
         public void Initialize(IScriptEngine scriptEngine, SceneObjectPart host, TaskInventoryItem item)
         {
@@ -167,6 +168,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             m_UrlModule = m_ScriptEngine.World.RequestModuleInterface<IUrlModule>();
             m_SoundModule = m_ScriptEngine.World.RequestModuleInterface<ISoundModule>();
+            m_envModule = m_ScriptEngine.World.RequestModuleInterface<IEnvironmentModule>();
 
             //private init
             lock (m_OSSLLock)
@@ -298,7 +300,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             IWorldComm wComm = m_ScriptEngine.World.RequestModuleInterface<IWorldComm>();
             if(wComm != null)
                 wComm.DeliverMessage(ChatTypeEnum.Shout, ScriptBaseClass.DEBUG_CHANNEL, m_host.Name, m_host.UUID, message);
-        }
+
+            if (m_item != null)
+                m_ScriptEngine.SleepScript(m_item.ItemID, 1000);
+            else
+                Thread.Sleep(1000);
+            }
 
         // Returns if OSSL is enabled. Throws a script exception if OSSL is not allowed..
         // for safe funtions always active
@@ -599,7 +606,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             if (World.Permissions.CanTerraformLand(m_host.OwnerID, new Vector3(x, y, 0)))
             {
-                World.Heightmap[x, y] = val;
+                World.Heightmap[x, y] = (float)val;
                 return 1;
             }
             else
@@ -1542,8 +1549,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         /// <param name="sunHour">The "Sun Hour" that is desired, 0...24, with 0 just after SunRise</param>
         public void osSetEstateSunSettings(bool sunFixed, double sunHour)
         {
+            /*
             CheckThreatLevel(ThreatLevel.High, "osSetEstateSunSettings");
-
+            
             while (sunHour > 24.0)
                 sunHour -= 24.0;
 
@@ -1556,28 +1564,98 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             World.EstateDataService.StoreEstateSettings(World.RegionInfo.EstateSettings);
 
             World.EventManager.TriggerEstateToolsSunUpdate(World.RegionInfo.RegionHandle);
+            */
         }
 
         /// <summary>
         /// Return the current Sun Hour 0...24, with 0 being roughly sun-rise
         /// </summary>
         /// <returns></returns>
-        public double osGetCurrentSunHour()
+        public LSL_Float osGetCurrentSunHour()
         {
             CheckThreatLevel();
 
-            // Must adjust for the fact that Region Sun Settings are still LL offset
-            double sunHour = World.RegionInfo.RegionSettings.SunPosition - 6;
+            if (m_envModule == null)
+                return 0;
 
-            // See if the sun module has registered itself, if so it's authoritative
-            ISunModule module = World.RequestModuleInterface<ISunModule>();
-            if (module != null)
+            float frac = m_envModule.GetRegionDayFractionTime();
+            return 24 * frac;
+        }
+
+        public LSL_Float osGetApparentTime()
+        {
+            CheckThreatLevel();
+
+            if (m_envModule == null)
+                return 0;
+
+            float frac = m_envModule.GetRegionDayFractionTime();
+            return 86400 * frac;
+        }
+
+        private string timeToString(float frac, bool format24)
+        {
+            int h = (int)frac;
+            frac -= h;
+            frac *= 60;
+            int m = (int)frac;
+            frac -= m;
+            frac *= 60;
+            int s = (int)frac;
+
+            if (format24)
             {
-                sunHour = module.GetCurrentSunHour();
+                return string.Format("{0:00}:{1:00}:{2:00}", h, m, s);
+            }
+            if (h > 12)
+                return string.Format("{0}:{1:00}:{2:00} PM", h - 12, m, s);
+            if (h == 12)
+                return string.Format("{0}:{1:00}:{2:00} PM", h, m, s);
+            return string.Format("{0}:{1:00}:{2:00} AM", h, m, s);
+        }
+
+        public LSL_String osGetApparentTimeString(LSL_Integer format24)
+        {
+            CheckThreatLevel();
+
+            if (m_envModule == null)
+            {
+                if (format24 != 0)
+                    return "00:00:00";
+                return "0:00:00 AM";
             }
 
-            return sunHour;
+            float frac = 24 * m_envModule.GetRegionDayFractionTime();
+            return timeToString(frac, format24 != 0);
         }
+
+        public LSL_Float osGetApparentRegionTime()
+        {
+            CheckThreatLevel();
+
+            if (m_envModule == null)
+                return 0;
+
+            float frac = m_envModule.GetRegionDayFractionTime();
+            return 86400 * frac;
+        }
+
+        public LSL_String osGetApparentRegionTimeString(LSL_Integer format24)
+        {
+            CheckThreatLevel();
+
+            if (m_envModule == null)
+            {
+                if (format24 != 0)
+                    return "00:00:00";
+                return "0:00:00 AM";
+            }
+
+            float frac = 24 * m_envModule.GetRegionDayFractionTime();
+
+            return timeToString(frac, format24 != 0);
+        }
+
 
         public double osSunGetParam(string param)
         {
@@ -3018,7 +3096,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         /// <param name="avatar"></param>
         /// <param name="notecard">The name of the notecard to which to save the appearance.</param>
         /// <returns>The asset ID of the notecard saved.</returns>
-        public LSL_Key osNpcSaveAppearance(LSL_Key npc, string notecard)
+
+        public LSL_Key osNpcSaveAppearance(LSL_Key npc, LSL_String notecard)
+        {
+            return NpcSaveAppearance(npc, notecard, false);
+        }
+
+        public LSL_Key osNpcSaveAppearance(LSL_Key npc, LSL_String notecard, LSL_Integer includeHuds)
+        {
+            return NpcSaveAppearance(npc, notecard, includeHuds == 0);
+        }
+
+        protected LSL_Key NpcSaveAppearance(LSL_Key npc, string notecard, bool NoHUds)
         {
             CheckThreatLevel(ThreatLevel.High, "osNpcSaveAppearance");
 
@@ -3026,14 +3115,13 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
             if (npcModule != null)
             {
-                UUID npcId;
-                if (!UUID.TryParse(npc.m_string, out npcId))
+                if (!UUID.TryParse(npc.m_string, out UUID npcId))
                     return new LSL_Key(UUID.Zero.ToString());
 
                 if (!npcModule.CheckPermissions(npcId, m_host.OwnerID))
                     return new LSL_Key(UUID.Zero.ToString());
 
-                return SaveAppearanceToNotecard(npcId, notecard);
+                return SaveAppearanceToNotecard(npcId, notecard, NoHUds);
             }
 
             return new LSL_Key(UUID.Zero.ToString());
@@ -3517,32 +3605,57 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         /// </summary>
         /// <param name="notecard">The name of the notecard to which to save the appearance.</param>
         /// <returns>The asset ID of the notecard saved.</returns>
-        public LSL_Key osOwnerSaveAppearance(string notecard)
+        public LSL_Key osOwnerSaveAppearance(LSL_String notecard)
         {
             CheckThreatLevel(ThreatLevel.High, "osOwnerSaveAppearance");
 
-            return SaveAppearanceToNotecard(m_host.OwnerID, notecard);
+            return SaveAppearanceToNotecard(m_host.OwnerID, notecard, false);
         }
 
-        public LSL_Key osAgentSaveAppearance(LSL_Key avatarKey, string notecard)
+        public LSL_Key osOwnerSaveAppearance(LSL_String notecard, LSL_Integer includeHuds)
+        {
+            CheckThreatLevel(ThreatLevel.High, "osOwnerSaveAppearance");
+
+            return SaveAppearanceToNotecard(m_host.OwnerID, notecard, includeHuds == 0);
+        }
+
+        public LSL_Key osAgentSaveAppearance(LSL_Key avatarKey, LSL_String notecard)
         {
             CheckThreatLevel(ThreatLevel.VeryHigh, "osAgentSaveAppearance");
 
-            UUID avatarId;
-            if (!UUID.TryParse(avatarKey, out avatarId))
+            if (!UUID.TryParse(avatarKey, out UUID avatarId))
                 return new LSL_Key(UUID.Zero.ToString());
 
-            return SaveAppearanceToNotecard(avatarId, notecard);
+            return SaveAppearanceToNotecard(avatarId, notecard, false);
         }
 
-        protected LSL_Key SaveAppearanceToNotecard(ScenePresence sp, string notecard)
+        public LSL_Key osAgentSaveAppearance(LSL_Key avatarKey, LSL_String notecard, LSL_Integer includeHuds)
+        {
+            CheckThreatLevel(ThreatLevel.VeryHigh, "osAgentSaveAppearance");
+
+            if (!UUID.TryParse(avatarKey, out UUID avatarId))
+                return new LSL_Key(UUID.Zero.ToString());
+
+            return SaveAppearanceToNotecard(avatarId, notecard, includeHuds == 0);
+        }
+
+        protected LSL_Key SaveAppearanceToNotecard(UUID avatarId, string notecard, bool NoHuds)
+        {
+            ScenePresence sp = World.GetScenePresence(avatarId);
+            if (sp == null || sp.IsChildAgent)
+                return new LSL_Key(UUID.Zero.ToString());
+
+            return SaveAppearanceToNotecard(sp, notecard, NoHuds);
+        }
+
+        protected LSL_Key SaveAppearanceToNotecard(ScenePresence sp, string notecard, bool NoHuds)
         {
             IAvatarFactoryModule appearanceModule = World.RequestModuleInterface<IAvatarFactoryModule>();
 
             if (appearanceModule != null)
             {
                 appearanceModule.SaveBakedTextures(sp.UUID);
-                OSDMap appearancePacked = sp.Appearance.PackForNotecard();
+                OSDMap appearancePacked = sp.Appearance.PackForNotecard(NoHuds);
 
                 TaskInventoryItem item
                     = SaveNotecard(notecard, "Avatar Appearance", Util.GetFormattedXml(appearancePacked as OSD), true);
@@ -3553,16 +3666,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             {
                 return new LSL_Key(UUID.Zero.ToString());
             }
-        }
-
-        protected LSL_Key SaveAppearanceToNotecard(UUID avatarId, string notecard)
-        {
-            ScenePresence sp = World.GetScenePresence(avatarId);
-
-            if (sp == null || sp.IsChildAgent)
-                return new LSL_Key(UUID.Zero.ToString());
-
-            return SaveAppearanceToNotecard(sp, notecard);
         }
 
         /// <summary>
@@ -3689,7 +3792,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             CheckThreatLevel(ThreatLevel.Moderate, "osGetSimulatorMemory");
 
-            long pws = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64;
+            long pws = Util.GetPhysicalMemUse();
 
             if (pws > Int32.MaxValue)
                 return Int32.MaxValue;
@@ -3703,9 +3806,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
         {
             CheckThreatLevel(ThreatLevel.Moderate, "osGetSimulatorMemoryKB");
 
-            long pws = System.Diagnostics.Process.GetCurrentProcess().WorkingSet64;
+            long pws = Util.GetPhysicalMemUse();
 
-            if((pws & 0x3FFL) != 0)
+            if ((pws & 0x3FFL) != 0)
                 pws += 0x400L;
             pws >>= 10;
 
@@ -5673,6 +5776,324 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             if (double.IsPositiveInfinity(d))
                 return 3;
             return 0;
+        }
+
+        public void osSetSitActiveRange(LSL_Float v)
+        {
+            if (v > 128f)
+                v = 128f;
+            float old = m_host.SitActiveRange;
+            m_host.SitActiveRange = (float)v;
+            if(old != (float)v)
+                m_host.ParentGroup.HasGroupChanged = true;
+        }
+
+        public void osSetLinkSitActiveRange(LSL_Integer linkNumber, LSL_Float v)
+        {
+            if (v > 128f)
+                v = 128f;
+
+            bool changed = false;
+            InitLSL();
+            List<SceneObjectPart> parts = m_LSL_Api.GetLinkParts(linkNumber);
+            for(int i = 0; i < parts.Count; ++i)
+            {
+                SceneObjectPart sop = parts[i];
+                float old = sop.SitActiveRange;
+                sop.SitActiveRange = (float)v;
+                if (old != (float)v)
+                    changed = true;
+            }
+
+            if (changed)
+                m_host.ParentGroup.HasGroupChanged = true;
+        }
+
+        public LSL_Float osGetSitActiveRange()
+        {
+            return m_host.SitActiveRange;
+        }
+
+        public LSL_Float osGetLinkSitActiveRange(LSL_Integer linkNumber)
+        {
+            if (linkNumber == ScriptBaseClass.LINK_THIS)
+                return m_host.SitActiveRange;
+            if (linkNumber < 0)
+                return int.MinValue;
+            if (linkNumber < 2)
+                return m_host.ParentGroup.RootPart.SitActiveRange;
+            SceneObjectPart target = m_host.ParentGroup.GetLinkNumPart(linkNumber);
+            if (target == null)
+                return int.MinValue;
+            return target.SitActiveRange;
+        }
+
+        public void osSetStandTarget(LSL_Vector v)
+        {
+            // todo add limits ?
+            Vector3 old = m_host.StandOffset;
+            m_host.StandOffset = v;
+            if(!old.ApproxEquals(v))
+                m_host.ParentGroup.HasGroupChanged = true;
+        }
+
+        public void osSetLinkStandTarget(LSL_Integer linkNumber, LSL_Vector v)
+        {
+            // todo add limits ?
+            SceneObjectPart target = null;
+            if (linkNumber == ScriptBaseClass.LINK_THIS)
+                target = m_host;
+            else if (linkNumber < 0)
+                return;
+            else if (linkNumber < 2)
+                target = m_host.ParentGroup.RootPart;
+            else
+                target = m_host.ParentGroup.GetLinkNumPart(linkNumber);
+
+            if (target == null)
+                return;
+
+            Vector3 old = target.StandOffset;
+            target.StandOffset = v;
+            if (!old.ApproxEquals(v))
+                m_host.ParentGroup.HasGroupChanged = true;
+        }
+
+        public LSL_Vector osGetStandTarget()
+        {
+            return m_host.StandOffset;
+        }
+
+        public LSL_Vector osGetLinkStandTarget(LSL_Integer linkNumber)
+        {
+            if (linkNumber == ScriptBaseClass.LINK_THIS)
+                return m_host.StandOffset;
+            if (linkNumber < 0)
+                return Vector3.Zero;
+            if (linkNumber < 2)
+                return m_host.ParentGroup.RootPart.StandOffset;
+            SceneObjectPart target = m_host.ParentGroup.GetLinkNumPart(linkNumber);
+            if (target == null)
+                return Vector3.Zero;
+            return target.StandOffset;
+        }
+
+        public LSL_Integer osClearObjectAnimations()
+        {
+            return m_host.ClearObjectAnimations();
+        }
+
+        public LSL_Integer osReplaceAgentEnvironment(LSL_Key agentkey, LSL_Integer transition, LSL_String daycycle)
+        {
+            m_host.AddScriptLPS(1);
+            if(!string.IsNullOrEmpty(CheckThreatLevelTest(ThreatLevel.Moderate, "osReplaceAgentEnvironment")))
+                return -2;
+
+            if (!UUID.TryParse(agentkey, out UUID agentid))
+                return -4;
+
+            ScenePresence sp = World.GetScenePresence(agentid);
+            if(sp == null || sp.IsChildAgent || sp.IsNPC || sp.IsInTransit)
+                return -4;
+
+            if(string.IsNullOrEmpty(daycycle) || daycycle == UUID.Zero.ToString())
+            {
+                sp.Environment = null;
+                m_envModule.WindlightRefreshForced(sp, transition);
+                return 1;
+            }
+
+            UUID envID = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, daycycle);
+            if (envID == UUID.Zero)
+                return -3;
+
+            AssetBase asset = World.AssetService.Get(envID.ToString());
+            if(asset == null || asset.Type != (byte)AssetType.Settings)
+                return -3;
+            // cant use stupid broken asset flags for subtype
+            try
+            {
+                OSD oenv = OSDParser.Deserialize(asset.Data);
+                ViewerEnvironment VEnv = m_envModule.GetRegionEnvironment().Clone();
+                if(!VEnv.CycleFromOSD(oenv))
+                    return -3;
+                sp.Environment = VEnv;
+                m_envModule.WindlightRefreshForced(sp, transition);
+            }
+            catch
+            {
+                sp.Environment = null;
+                m_envModule.WindlightRefreshForced(sp, transition);
+                return -9;
+            }
+            return 1;
+        }
+
+        public LSL_Integer osReplaceParcelEnvironment(LSL_Integer transition, LSL_String daycycle)
+        {
+            m_host.AddScriptLPS(1);
+
+            if (!World.RegionInfo.EstateSettings.AllowEnvironmentOverride)
+                return -1;
+
+            ILandObject parcel = World.LandChannel.GetLandObject(m_host.GetWorldPosition().X, m_host.GetWorldPosition().Y);
+            if (parcel == null)
+                return -2;
+
+            if (!World.Permissions.CanEditParcelProperties(m_host.OwnerID, parcel, (GroupPowers.AllowEnvironment | GroupPowers.LandEdit), true))
+                return -3;
+
+            ViewerEnvironment VEnv;
+            if (parcel.LandData.Environment == null)
+                VEnv = m_envModule.GetRegionEnvironment().Clone();
+            else
+                VEnv = parcel.LandData.Environment;
+
+            bool changed = false;
+            if (!string.IsNullOrEmpty(daycycle) || !(daycycle == UUID.Zero.ToString()))
+            {
+
+                UUID envID = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, daycycle);
+                if (envID == UUID.Zero)
+                    return -4;
+
+                AssetBase asset = World.AssetService.Get(envID.ToString());
+                if (asset == null || asset.Type != (byte)AssetType.Settings)
+                    return -4;
+                // cant use stupid broken asset flags for subtype
+                try
+                {
+                    OSD oenv = OSDParser.Deserialize(asset.Data);
+                    if (!VEnv.CycleFromOSD(oenv))
+                        return -5;
+                    changed = true;
+                }
+                catch
+                {
+                    return -5;
+                }
+            }
+
+            if (changed)
+            {
+                parcel.StoreEnvironment(VEnv);
+                m_envModule.WindlightRefresh(transition, false);
+            }
+
+            return 1;
+        }
+
+        public LSL_Integer osReplaceRegionEnvironment(LSL_Integer transition, LSL_String daycycle,
+            LSL_Float daylen, LSL_Float dayoffset,
+            LSL_Float altitude1, LSL_Float altitude2, LSL_Float altitude3)
+        {
+            m_host.AddScriptLPS(1);
+
+            if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, true))
+                return -3;
+
+            ViewerEnvironment VEnv = m_envModule.GetRegionEnvironment().Clone();
+
+            bool changed = false;
+            if (!string.IsNullOrEmpty(daycycle) || !(daycycle == UUID.Zero.ToString()))
+            {
+
+                UUID envID = ScriptUtils.GetAssetIdFromKeyOrItemName(m_host, daycycle);
+                if (envID == UUID.Zero)
+                    return -4;
+
+                AssetBase asset = World.AssetService.Get(envID.ToString());
+                if (asset == null || asset.Type != (byte)AssetType.Settings)
+                    return -4;
+                // cant use stupid broken asset flags for subtype
+                try
+                {
+                    OSD oenv = OSDParser.Deserialize(asset.Data);
+                    if (!VEnv.CycleFromOSD(oenv))
+                        return -5;
+                    changed = true;
+                }
+                catch
+                {
+                    return -5;
+                }
+            }
+
+            if (daylen >= 4 && daylen <= 24 * 7)
+            {
+                int ll = VEnv.DayLength;
+                VEnv.DayLength = (int)(daylen * 3600f);
+                changed = ll != VEnv.DayLength;
+            }
+
+            if (dayoffset >= -11.5 && dayoffset <= 11.5)
+            {
+                int lo = VEnv.DayLength;
+                if (dayoffset <= 0)
+                    dayoffset+= 24;
+                VEnv.DayLength = (int)(dayoffset * 3600f);
+                changed = lo != VEnv.DayOffset;
+            }
+
+            bool needSort = false;
+            if (altitude1 > 0 && altitude1 < 4000 && VEnv.Altitudes[0] != (float)altitude1)
+            {
+                VEnv.Altitudes[0] = (float)altitude1;
+                needSort = true;
+            }
+            if (altitude2 > 0 && altitude2 < 4000 && VEnv.Altitudes[1] != (float)altitude2)
+            {
+                VEnv.Altitudes[1] = (float)altitude2;
+                needSort = true;
+            }
+            if (altitude3 > 0 && altitude2 < 4000 && VEnv.Altitudes[2] != (float)altitude3)
+            {
+                VEnv.Altitudes[2] = (float)altitude3;
+                needSort = true;
+            }
+            if(needSort)
+            {
+                VEnv.SortAltitudes();
+                changed = true;
+            }
+
+            if(changed)
+            {
+                m_envModule.StoreOnRegion(VEnv);
+                m_envModule.WindlightRefresh(transition);
+            }
+            return 1;
+        }
+
+        public LSL_Integer osResetEnvironment(LSL_Integer parcelOrRegion, LSL_Integer transition)
+        {
+            m_host.AddScriptLPS(1);
+
+            if (parcelOrRegion > 0)
+            {
+                if (!World.RegionInfo.EstateSettings.AllowEnvironmentOverride)
+                    return -1;
+
+                ILandObject parcel = World.LandChannel.GetLandObject(m_host.GetWorldPosition().X, m_host.GetWorldPosition().Y);
+                if (parcel == null)
+                    return -2;
+
+                if (!World.Permissions.CanEditParcelProperties(m_host.OwnerID, parcel, (GroupPowers.AllowEnvironment | GroupPowers.LandEdit), true))
+                    return -3;
+                if (parcel.LandData.Environment == null)
+                    return 1;
+
+                parcel.StoreEnvironment(null);
+                m_envModule.WindlightRefresh(transition, false);
+                return 1;
+            }
+
+            if (!World.Permissions.CanIssueEstateCommand(m_host.OwnerID, true))
+                return -3;
+
+            m_envModule.StoreOnRegion(null);
+            m_envModule.WindlightRefresh(transition);
+            return 1;
         }
     }
 }

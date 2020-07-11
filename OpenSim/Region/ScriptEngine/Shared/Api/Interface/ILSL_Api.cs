@@ -205,7 +205,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
        LSL_Integer llGetStartParameter();
        LSL_Integer llGetStatus(int status);
         LSL_String llGetSubString(string src, int start, int end);
-        LSL_Vector llGetSunDirection();
         LSL_String llGetTexture(int face);
         LSL_Vector llGetTextureOffset(int face);
          LSL_Float llGetTextureRot(int side);
@@ -218,7 +217,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_Vector llGetVel();
          LSL_Float llGetWallclock();
               void llGiveInventory(LSL_Key destination, LSL_String inventory);
-              void llGiveInventoryList(LSL_Key destination, LSL_String category, LSL_List inventory);
+              void llGiveInventoryList(LSL_Key destination, LSL_String folderName, LSL_List inventory);
        LSL_Integer llGiveMoney(LSL_Key destination, LSL_Integer amount);
            LSL_Key llTransferLindenDollars(LSL_Key destination, LSL_Integer amount);
               void llGodLikeRezObject(string inventory, LSL_Vector pos);
@@ -461,5 +460,19 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_String llList2Json(LSL_String type, LSL_List values);
         LSL_String llJsonSetValue(LSL_String json, LSL_List specifiers, LSL_String value);
         LSL_String llJsonValueType(LSL_String json, LSL_List specifiers);
+
+
+        LSL_Integer llGetDayLength();
+        LSL_Integer llGetRegionDayLength();
+        LSL_Integer llGetDayOffset();
+        LSL_Integer llGetRegionDayOffset();
+        LSL_Vector llGetSunDirection();
+        LSL_Vector llGetRegionSunDirection();
+        LSL_Vector llGetMoonDirection();
+        LSL_Vector llGetRegionMoonDirection();
+        LSL_Rotation llGetSunRotation();
+        LSL_Rotation llGetRegionSunRotation();
+        LSL_Rotation llGetMoonRotation();
+        LSL_Rotation llGetRegionMoonRotation();
     }
 }

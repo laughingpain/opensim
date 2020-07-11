@@ -1336,156 +1336,163 @@ namespace OpenSim.Region.CoreModules.World.Terrain
             if(now < NextModifyTerrainTime)
                 return;
 
-            NextModifyTerrainTime = double.MaxValue; // block it
-
-            //m_log.DebugFormat("brushs {0} seconds {1} height {2}, parcel {3}", brushSize, seconds, height, parcelLocalID);
-            bool god = m_scene.Permissions.IsGod(user);
-            bool allowed = false;
-            if (north == south && east == west)
+            try
             {
-                if (m_painteffects.ContainsKey((StandardTerrainEffects)action))
+                NextModifyTerrainTime = double.MaxValue; // block it
+
+                //m_log.DebugFormat("brushs {0} seconds {1} height {2}, parcel {3}", brushSize, seconds, height, parcelLocalID);
+                bool god = m_scene.Permissions.IsGod(user);
+                bool allowed = false;
+                if (north == south && east == west)
                 {
-                    bool[,] allowMask = new bool[m_channel.Width, m_channel.Height];
+                    if (m_painteffects.ContainsKey((StandardTerrainEffects)action))
+                    {
+                        bool[,] allowMask = new bool[m_channel.Width, m_channel.Height];
                     
-                    allowMask.Initialize();
+                        allowMask.Initialize();
 
-                    int startX = (int)(west - brushSize + 0.5);
-                    if (startX < 0)
-                        startX = 0;
+                        int startX = (int)(west - brushSize + 0.5);
+                        if (startX < 0)
+                            startX = 0;
 
-                    int startY = (int)(north - brushSize + 0.5);
-                    if (startY < 0)
-                        startY = 0;
+                        int startY = (int)(north - brushSize + 0.5);
+                        if (startY < 0)
+                            startY = 0;
 
-                    int endX = (int)(west + brushSize + 0.5);
-                    if (endX >= m_channel.Width)
-                        endX = m_channel.Width - 1;
-                    int endY = (int)(north + brushSize + 0.5);
-                    if (endY >= m_channel.Height)
-                        endY = m_channel.Height - 1;
+                        int endX = (int)(west + brushSize + 0.5);
+                        if (endX >= m_channel.Width)
+                            endX = m_channel.Width - 1;
+                        int endY = (int)(north + brushSize + 0.5);
+                        if (endY >= m_channel.Height)
+                            endY = m_channel.Height - 1;
 
-                    int x, y;
+                        int x, y;
 
-                    for (x = startX; x <= endX; x++)
-                    {
-                        for (y = startY; y <= endY; y++)
-                        {
-                            if (m_scene.Permissions.CanTerraformLand(user, new Vector3(x, y, -1)))
-                            {
-                                allowMask[x, y] = true;
-                                allowed = true;
-                            }
-                        }
-                    }
-                    if (allowed)
-                    {
-                        StoreUndoState();
-                        m_painteffects[(StandardTerrainEffects) action].PaintEffect(
-                            m_channel, allowMask, west, south, height, brushSize, seconds,
-                            startX, endX, startY, endY);
-
-                        //block changes outside estate limits
-                        if (!god)
-                            EnforceEstateLimits(startX, endX, startY, endY);
-                    }
-                }
-                else
-                {
-                    m_log.Debug("Unknown terrain brush type " + action);
-                }
-            }
-            else
-            {
-                if (m_floodeffects.ContainsKey((StandardTerrainEffects)action))
-                {
-                    bool[,] fillArea = new bool[m_channel.Width, m_channel.Height];
-                    fillArea.Initialize();
-
-                    int startX = (int)west;
-                    int startY = (int)south;
-                    int endX = (int)east;
-                    int endY = (int)north;
-
-                    if (startX < 0)
-                        startX = 0;
-                    else if (startX >= m_channel.Width)
-                        startX = m_channel.Width - 1;
-
-                    if (endX < 0)
-                        endX = 0;
-                    else if (endX >= m_channel.Width)
-                        endX = m_channel.Width - 1;
-
-                    if (startY < 0)
-                        startY = 0;
-                    else if (startY >= m_channel.Height)
-                        startY = m_channel.Height - 1;
-
-                    if (endY < 0)
-                        endY = 0;
-                    else if (endY >= m_channel.Height)
-                        endY = m_channel.Height - 1;
-
-                    int x, y;
-                    if (parcelLocalID == -1)
-                    {
                         for (x = startX; x <= endX; x++)
                         {
                             for (y = startY; y <= endY; y++)
                             {
                                 if (m_scene.Permissions.CanTerraformLand(user, new Vector3(x, y, -1)))
                                 {
-                                    fillArea[x, y] = true;
+                                    allowMask[x, y] = true;
                                     allowed = true;
                                 }
                             }
                         }
+                        if (allowed)
+                        {
+                            StoreUndoState();
+                            m_painteffects[(StandardTerrainEffects) action].PaintEffect(
+                                m_channel, allowMask, west, south, height, brushSize, seconds,
+                                startX, endX, startY, endY);
+
+                            //block changes outside estate limits
+                            if (!god)
+                                EnforceEstateLimits(startX, endX, startY, endY);
+                        }
                     }
                     else
                     {
-                        if (!m_scene.Permissions.CanTerraformLand(user, new Vector3(-1, -1, parcelLocalID)))
-                            return;
-
-                        ILandObject parcel = m_scene.LandChannel.GetLandObject(parcelLocalID);
-                        if(parcel == null)
-                            return;
-                        bool [,] parcelmap = parcel.GetLandBitmap();
-//ugly
-                        for (x = startX; x <= endX; x++)
-                        {
-                            int px = x >> 2;
-                            y = startY;
-                            while( y <= endY)
-                            {
-                                int py = y >> 2;
-                                bool inp = parcelmap[px, py];
-                                fillArea[x, y++] = inp;
-                                fillArea[x, y++] = inp;
-                                fillArea[x, y++] = inp;
-                                fillArea[x, y++] = inp;
-                            }
-                        }
-
-                        allowed = true;
-                    }
-
-                    if (allowed)
-                    {
-                        StoreUndoState();
-                        m_floodeffects[(StandardTerrainEffects)action].FloodEffect(m_channel, fillArea, height, seconds,
-                            startX, endX, startY, endY);
-
-                        //block changes outside estate limits
-                        if (!god)
-                            EnforceEstateLimits(startX, endX, startY, endY);
+                        m_log.Debug("Unknown terrain brush type " + action);
                     }
                 }
                 else
                 {
-                    m_log.Debug("Unknown terrain flood type " + action);
+                    if (m_floodeffects.ContainsKey((StandardTerrainEffects)action))
+                    {
+                        bool[,] fillArea = new bool[m_channel.Width, m_channel.Height];
+                        fillArea.Initialize();
+
+                        int startX = (int)west;
+                        int startY = (int)south;
+                        int endX = (int)east;
+                        int endY = (int)north;
+
+                        if (startX < 0)
+                            startX = 0;
+                        else if (startX >= m_channel.Width)
+                            startX = m_channel.Width - 1;
+
+                        if (endX < 0)
+                            endX = 0;
+                        else if (endX >= m_channel.Width)
+                            endX = m_channel.Width - 1;
+
+                        if (startY < 0)
+                            startY = 0;
+                        else if (startY >= m_channel.Height)
+                            startY = m_channel.Height - 1;
+
+                        if (endY < 0)
+                            endY = 0;
+                        else if (endY >= m_channel.Height)
+                            endY = m_channel.Height - 1;
+
+                        int x, y;
+                        if (parcelLocalID == -1)
+                        {
+                            for (x = startX; x <= endX; x++)
+                            {
+                                for (y = startY; y <= endY; y++)
+                                {
+                                    if (m_scene.Permissions.CanTerraformLand(user, new Vector3(x, y, -1)))
+                                    {
+                                        fillArea[x, y] = true;
+                                        allowed = true;
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (!m_scene.Permissions.CanTerraformLand(user, new Vector3(-1, -1, parcelLocalID)))
+                                return;
+
+                            ILandObject parcel = m_scene.LandChannel.GetLandObject(parcelLocalID);
+                            if(parcel == null)
+                                return;
+
+                            bool[,] parcelmap = parcel.GetLandBitmap();
+                            //ugly
+                            for (x = startX; x <= endX; x++)
+                            {
+                                int px = x >> 2;
+                                y = startY;
+                                while( y <= endY)
+                                {
+                                    int py = y >> 2;
+                                    bool inp = parcelmap[px, py];
+                                    fillArea[x, y++] = inp;
+                                    fillArea[x, y++] = inp;
+                                    fillArea[x, y++] = inp;
+                                    fillArea[x, y++] = inp;
+                                }
+                            }
+
+                            allowed = true;
+                        }
+
+                        if (allowed)
+                        {
+                            StoreUndoState();
+                            m_floodeffects[(StandardTerrainEffects)action].FloodEffect(m_channel, fillArea, height, seconds,
+                                startX, endX, startY, endY);
+
+                            //block changes outside estate limits
+                            if (!god)
+                                EnforceEstateLimits(startX, endX, startY, endY);
+                        }
+                    }
+                    else
+                    {
+                        m_log.Debug("Unknown terrain flood type " + action);
+                    }
                 }
             }
-            NextModifyTerrainTime = Util.GetTimeStamp() + 0.02; // 20ms cooldown
+            finally
+            {
+                NextModifyTerrainTime = Util.GetTimeStamp() + 0.02; // 20ms cooldown
+            }
         }
 
         private void client_OnBakeTerrain(IClientAPI remoteClient)
@@ -1564,8 +1571,8 @@ namespace OpenSim.Region.CoreModules.World.Terrain
                 {
                     for (int y = 0; y < m_channel.Height / 2; y++)
                     {
-                        double height = m_channel[x, y];
-                        double flippedHeight = m_channel[x, (int)m_channel.Height - 1 - y];
+                        float height = m_channel[x, y];
+                        float flippedHeight = m_channel[x, (int)m_channel.Height - 1 - y];
                         m_channel[x, y] = flippedHeight;
                         m_channel[x, (int)m_channel.Height - 1 - y] = height;
 
@@ -1578,8 +1585,8 @@ namespace OpenSim.Region.CoreModules.World.Terrain
                 {
                     for (int x = 0; x < m_channel.Width / 2; x++)
                     {
-                        double height = m_channel[x, y];
-                        double flippedHeight = m_channel[(int)m_channel.Width - 1 - x, y];
+                        float height = m_channel[x, y];
+                        float flippedHeight = m_channel[(int)m_channel.Width - 1 - x, y];
                         m_channel[x, y] = flippedHeight;
                         m_channel[(int)m_channel.Width - 1 - x, y] = height;
 
@@ -1594,11 +1601,11 @@ namespace OpenSim.Region.CoreModules.World.Terrain
 
         private void InterfaceRescaleTerrain(Object[] args)
         {
-            double desiredMin = (double)args[0];
-            double desiredMax = (double)args[1];
+            float desiredMin = (float)args[0];
+            float desiredMax = (float)args[1];
 
             // determine desired scaling factor
-            double desiredRange = desiredMax - desiredMin;
+            float desiredRange = desiredMax - desiredMin;
             //m_log.InfoFormat("Desired {0}, {1} = {2}", new Object[] { desiredMin, desiredMax, desiredRange });
 
             if (desiredRange == 0d)
@@ -1609,8 +1616,8 @@ namespace OpenSim.Region.CoreModules.World.Terrain
             else
             {
                 //work out current heightmap range
-                double currMin = double.MaxValue;
-                double currMax = double.MinValue;
+                float currMin = float.MaxValue;
+                float currMax = float.MinValue;
 
                 int width = m_channel.Width;
                 int height = m_channel.Height;
@@ -1619,7 +1626,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
                 {
                     for(int y = 0; y < height; y++)
                     {
-                        double currHeight = m_channel[x, y];
+                        float currHeight = m_channel[x, y];
                         if (currHeight < currMin)
                         {
                             currMin = currHeight;
@@ -1631,8 +1638,8 @@ namespace OpenSim.Region.CoreModules.World.Terrain
                     }
                 }
 
-                double currRange = currMax - currMin;
-                double scale = desiredRange / currRange;
+                float currRange = currMax - currMin;
+                float scale = desiredRange / currRange;
 
                 //m_log.InfoFormat("Current {0}, {1} = {2}", new Object[] { currMin, currMax, currRange });
                 //m_log.InfoFormat("Scale = {0}", scale);
@@ -1642,7 +1649,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
                 {
                     for(int y = 0; y < height; y++)
                     {
-                        double currHeight = m_channel[x, y] - currMin;
+                        float currHeight = m_channel[x, y] - currMin;
                         m_channel[x, y] = desiredMin + (currHeight * scale);
                     }
                 }
@@ -1652,7 +1659,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
 
         private void InterfaceElevateTerrain(Object[] args)
         {
-            double val = (double)args[0];
+            float val = (float)args[0];
 
             int x, y;
             for (x = 0; x < m_channel.Width; x++)
@@ -1663,7 +1670,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
         private void InterfaceMultiplyTerrain(Object[] args)
         {
             int x, y;
-            double val = (double)args[0];
+            float val = (float)args[0];
 
             for (x = 0; x < m_channel.Width; x++)
                 for (y = 0; y < m_channel.Height; y++)
@@ -1673,7 +1680,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
         private void InterfaceLowerTerrain(Object[] args)
         {
             int x, y;
-            double val = (double)args[0];
+            float val = (float)args[0];
 
             for (x = 0; x < m_channel.Width; x++)
                 for (y = 0; y < m_channel.Height; y++)
@@ -1683,7 +1690,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
         public void InterfaceFillTerrain(Object[] args)
         {
             int x, y;
-            double val = (double)args[0];
+            float val = (float)args[0];
 
             for (x = 0; x < m_channel.Width; x++)
                 for (y = 0; y < m_channel.Height; y++)
@@ -1693,7 +1700,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
         private void InterfaceMinTerrain(Object[] args)
         {
             int x, y;
-            double val = (double)args[0];
+            float val = (float)args[0];
             for (x = 0; x < m_channel.Width; x++)
             {
                 for(y = 0; y < m_channel.Height; y++)
@@ -1706,7 +1713,7 @@ namespace OpenSim.Region.CoreModules.World.Terrain
         private void InterfaceMaxTerrain(Object[] args)
         {
             int x, y;
-            double val = (double)args[0];
+            float val = (float)args[0];
             for (x = 0; x < m_channel.Width; x++)
             {
                 for(y = 0; y < m_channel.Height; y++)
@@ -1733,8 +1740,8 @@ namespace OpenSim.Region.CoreModules.World.Terrain
 
         private void InterfaceShowDebugStats(Object[] args)
         {
-            double max = Double.MinValue;
-            double min = double.MaxValue;
+            float max = float.MinValue;
+            float min = float.MaxValue;
             double sum = 0;
 
             int x;
@@ -1832,19 +1839,19 @@ namespace OpenSim.Region.CoreModules.World.Terrain
             Command fillRegionCommand =
                 new Command("fill", CommandIntentions.COMMAND_HAZARDOUS, InterfaceFillTerrain, "Fills the current heightmap with a specified value.");
             fillRegionCommand.AddArgument("value", "The numeric value of the height you wish to set your region to.",
-                                          "Double");
+                                          "Float");
 
             Command elevateCommand =
                 new Command("elevate", CommandIntentions.COMMAND_HAZARDOUS, InterfaceElevateTerrain, "Raises the current heightmap by the specified amount.");
-            elevateCommand.AddArgument("amount", "The amount of height to add to the terrain in meters.", "Double");
+            elevateCommand.AddArgument("amount", "The amount of height to add to the terrain in meters.", "Float");
 
             Command lowerCommand =
                 new Command("lower", CommandIntentions.COMMAND_HAZARDOUS, InterfaceLowerTerrain, "Lowers the current heightmap by the specified amount.");
-            lowerCommand.AddArgument("amount", "The amount of height to remove from the terrain in meters.", "Double");
+            lowerCommand.AddArgument("amount", "The amount of height to remove from the terrain in meters.", "Float");
 
             Command multiplyCommand =
                 new Command("multiply", CommandIntentions.COMMAND_HAZARDOUS, InterfaceMultiplyTerrain, "Multiplies the heightmap by the value specified.");
-            multiplyCommand.AddArgument("value", "The value to multiply the heightmap by.", "Double");
+            multiplyCommand.AddArgument("value", "The value to multiply the heightmap by.", "Float");
 
             Command bakeRegionCommand =
                 new Command("bake", CommandIntentions.COMMAND_HAZARDOUS, InterfaceBakeTerrain, "Saves the current terrain into the regions baked map.");
@@ -1857,14 +1864,14 @@ namespace OpenSim.Region.CoreModules.World.Terrain
 
             Command rescaleCommand =
                 new Command("rescale", CommandIntentions.COMMAND_HAZARDOUS, InterfaceRescaleTerrain, "Rescales the current terrain to fit between the given min and max heights");
-            rescaleCommand.AddArgument("min", "min terrain height after rescaling", "Double");
-            rescaleCommand.AddArgument("max", "max terrain height after rescaling", "Double");
+            rescaleCommand.AddArgument("min", "min terrain height after rescaling", "Float");
+            rescaleCommand.AddArgument("max", "max terrain height after rescaling", "Float");
 
             Command minCommand = new Command("min", CommandIntentions.COMMAND_HAZARDOUS, InterfaceMinTerrain, "Sets the minimum terrain height to the specified value.");
-            minCommand.AddArgument("min", "terrain height to use as minimum", "Double");
+            minCommand.AddArgument("min", "terrain height to use as minimum", "Float");
 
             Command maxCommand = new Command("max", CommandIntentions.COMMAND_HAZARDOUS, InterfaceMaxTerrain, "Sets the maximum terrain height to the specified value.");
-            maxCommand.AddArgument("min", "terrain height to use as maximum", "Double");
+            maxCommand.AddArgument("min", "terrain height to use as maximum", "Float");
 
 
             // Debug

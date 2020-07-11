@@ -30,8 +30,6 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Reflection;
-using System.Runtime.Serialization;
-using System.Security.Permissions;
 using System.Threading;
 using System.Text;
 using System.Xml;
@@ -39,10 +37,8 @@ using System.Xml.Serialization;
 using log4net;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
-using OpenMetaverse.StructuredData;
 using OpenSim.Framework;
 using OpenSim.Region.Framework.Interfaces;
-using OpenSim.Region.Framework.Scenes.Scripting;
 using OpenSim.Region.Framework.Scenes.Serialization;
 using OpenSim.Region.PhysicsModules.SharedBase;
 using PermissionMask = OpenSim.Framework.PermissionMask;
@@ -97,7 +93,7 @@ namespace OpenSim.Region.Framework.Scenes
 
     #endregion Enumerations
 
-    public class SceneObjectPart : ISceneEntity
+    public class SceneObjectPart : ISceneEntity, IDisposable
     {
         /// <value>
         /// Denote all sides of the prim
@@ -186,6 +182,10 @@ namespace OpenSim.Region.Framework.Scenes
         public Vector3 StatusSandboxPos;
 
         [XmlIgnore]
+        public int PseudoCRC; // this is local to region. should only be stored on its db.
+                              // This is just a number that needs to change to invalidate prim data caches
+
+        [XmlIgnore]
         public int[] PayPrice = {-2,-2,-2,-2,-2};
 
         [XmlIgnore]
@@ -246,7 +246,7 @@ namespace OpenSim.Region.Framework.Scenes
             set { m_fromUserInventoryItemID = value; }
         }
 
-        public scriptEvents AggregateScriptEvents;
+        public scriptEvents AggregatedScriptEvents;
 
         public Vector3 AttachedPos  { get; set; }
 
@@ -409,10 +409,7 @@ namespace OpenSim.Region.Framework.Scenes
             m_particleSystem = Utils.EmptyBytes;
             Rezzed = DateTime.UtcNow;
             Description = String.Empty;
- 
-            // Prims currently only contain a single folder (Contents).  From looking at the Second Life protocol,
-            // this appears to have the same UUID (!) as the prim.  If this isn't the case, one can't drag items from
-            // the prim into an agent inventory (Linden client reports that the "Object not found for drop" in its log
+            PseudoCRC = (int)DateTime.UtcNow.Ticks; // random could be as good; fallbak if not on region db
             m_inventory = new SceneObjectPartInventory(this);
             LastColSoundSentTime = Util.EnvironmentTickCount();
         }
@@ -447,9 +444,43 @@ namespace OpenSim.Region.Framework.Scenes
             Acceleration = Vector3.Zero;
             APIDActive = false;
             Flags = 0;
-            CreateSelected = true;
+            CreateSelected = false;
             TrimPermissions();
             AggregateInnerPerms();
+        }
+
+        ~SceneObjectPart()
+        {
+            Dispose(false);
+        }
+
+        private bool disposed = false;
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected void Dispose(bool disposing)
+        {
+            // Check to see if Dispose has already been called.
+            if (!disposed)
+            {
+                if (KeyframeMotion != null)
+                {
+                    KeyframeMotion.Delete();
+                    KeyframeMotion = null;
+                }
+                if (PhysActor != null)
+                    RemoveFromPhysics();
+
+                if (m_inventory != null)
+                {
+                    m_inventory.Dispose();
+                    m_inventory = null;
+                }
+                disposed = true;
+            }
         }
 
         #endregion Constructors
@@ -1220,7 +1251,7 @@ namespace OpenSim.Region.Framework.Scenes
 
         public scriptEvents ScriptEvents
         {
-            get { return AggregateScriptEvents; }
+            get { return AggregatedScriptEvents; }
         }
 
         public Quaternion SitTargetOrientation
@@ -1256,6 +1287,9 @@ namespace OpenSim.Region.Framework.Scenes
             get { return m_sitTargetOrientation; }
             set { m_sitTargetOrientation = value; }
         }
+
+        public float SitActiveRange { get; set;}
+        public Vector3 StandOffset { get; set;}
 
         public bool Stopped
         {
@@ -2069,7 +2103,12 @@ namespace OpenSim.Region.Framework.Scenes
                 return;
 
             if (PhysicsShapeType == (byte)PhysShapeType.none)
-                return;
+            {
+                if(ParentID == 0)
+                    m_physicsShapeType = DefaultPhysicsShapeType();
+                else
+                    return;
+            }
 
             bool isPhysical = (_ObjectFlags & (uint) PrimFlags.Physics) != 0;
             bool isPhantom = (_ObjectFlags & (uint)PrimFlags.Phantom) != 0;
@@ -2188,6 +2227,8 @@ namespace OpenSim.Region.Framework.Scenes
 
             if (dupe.PhysActor != null)
                 dupe.PhysActor.LocalID = plocalID;
+
+            dupe.PseudoCRC = (int)(DateTime.UtcNow.Ticks);
 
             ParentGroup.Scene.EventManager.TriggerOnSceneObjectPartCopy(dupe, this, userExposed);
 
@@ -2313,15 +2354,7 @@ namespace OpenSim.Region.Framework.Scenes
                 if (pa != null)
                 {
                     if (UsePhysics != pa.IsPhysical)
-                    {
-                        float minsize = UsePhysics ? ParentGroup.Scene.m_minPhys : ParentGroup.Scene.m_minNonphys;
-                        float maxsize = UsePhysics ? ParentGroup.Scene.m_maxPhys : ParentGroup.Scene.m_maxNonphys;
-                        Vector3 scale = Scale;
-                        scale.X = Util.Clamp(scale.X, minsize, maxsize);
-                        scale.Y = Util.Clamp(scale.Y, minsize, maxsize);
-                        scale.Z = Util.Clamp(scale.Z, minsize, maxsize);
-                        Scale = scale;
-                    }
+                        ClampScale(UsePhysics);
 
                     if (UsePhysics != pa.IsPhysical || isNew)
                     {
@@ -2668,9 +2701,10 @@ namespace OpenSim.Region.Framework.Scenes
             detobj.velVector = obj.Velocity;
             detobj.colliderType = 0;
             detobj.groupUUID = obj.GroupID;
-            if (VolumeDetectActive)
-                detobj.linkNumber = 0;
-            else
+            // allow detector link number to be seen, unlike spec
+            //if (VolumeDetectActive)
+            //    detobj.linkNumber = 0;
+            //else
                 detobj.linkNumber = LinkNum;
             return detobj;
         }
@@ -2690,9 +2724,9 @@ namespace OpenSim.Region.Framework.Scenes
             else if(detobj.velVector != Vector3.Zero)
                 detobj.colliderType |= 0x2; //active
             detobj.groupUUID = av.ControllingClient.ActiveGroupId;
-            if (VolumeDetectActive)
-                detobj.linkNumber = 0;
-            else
+            //if (VolumeDetectActive)
+            //    detobj.linkNumber = 0;
+            //else
                 detobj.linkNumber = LinkNum;
 
             return detobj;
@@ -3021,12 +3055,20 @@ namespace OpenSim.Region.Framework.Scenes
         {
             lock (m_scriptEvents)
             {
-                if (m_scriptEvents.ContainsKey(scriptid))
+                if (m_scriptEvents.TryGetValue(scriptid, out scriptEvents ev))
                 {
+                    if((ev & (scriptEvents.anyTarget)) != 0 && ParentGroup != null)
+                            ParentGroup.RemoveScriptTargets(scriptid);
                     m_scriptEvents.Remove(scriptid);
                     aggregateScriptEvents();
                 }
             }
+        }
+
+        public void RemoveScriptTargets(UUID scriptid)
+        {
+            if(ParentGroup != null)
+                ParentGroup.RemoveScriptTargets(scriptid);
         }
 
         /// <summary>
@@ -3040,6 +3082,52 @@ namespace OpenSim.Region.Framework.Scenes
             LinkNum = linkNum;
             LocalId = 0;
             Inventory.ResetInventoryIDs();
+            ++PseudoCRC;
+        }
+
+
+        private void ClampScale(bool isPhysical)
+        {
+            float minsize = isPhysical ? ParentGroup.Scene.m_minPhys : ParentGroup.Scene.m_minNonphys;
+            float maxsize = isPhysical ? ParentGroup.Scene.m_maxPhys : ParentGroup.Scene.m_maxNonphys;
+            Vector3 scale = Scale;
+            bool changed = false;
+
+            if (scale.X < minsize)
+            {
+                scale.X = minsize;
+                changed = true;
+            }
+            else if (scale.X > maxsize)
+            {
+                scale.X = maxsize;
+                changed = true;
+            }
+
+            if (scale.Y < minsize)
+            {
+                scale.Y = minsize;
+                changed = true;
+            }
+            else if (scale.Y > maxsize)
+            {
+                scale.Y = maxsize;
+                changed = true;
+            }
+
+            if (scale.Z < minsize)
+            {
+                scale.Z = minsize;
+                changed = true;
+            }
+            else if (scale.Z > maxsize)
+            {
+                scale.Z = maxsize;
+                changed = true;
+            }
+
+            if (changed)
+                Scale = scale;
         }
 
         /// <summary>
@@ -3145,8 +3233,9 @@ namespace OpenSim.Region.Framework.Scenes
         {
             if (ParentGroup == null || ParentGroup.IsDeleted || ParentGroup.Scene == null)
                 return;
- 
-            if(ParentGroup.Scene.GetNumberOfClients() == 0)
+
+            ++PseudoCRC;
+            if (ParentGroup.Scene.GetNumberOfClients() == 0)
                 return;
 
             ParentGroup.QueueForUpdateCheck(); // just in case
@@ -3161,6 +3250,8 @@ namespace OpenSim.Region.Framework.Scenes
         {
             if (ParentGroup == null || ParentGroup.IsDeleted || ParentGroup.Scene == null)
                 return;
+
+            ++PseudoCRC;
 
             if (ParentGroup.Scene.GetNumberOfClients() == 0)
                 return;
@@ -3186,6 +3277,7 @@ namespace OpenSim.Region.Framework.Scenes
             if (ParentGroup == null || ParentGroup.IsDeleted || ParentGroup.Scene == null)
                 return;
 
+            ++PseudoCRC;
             ParentGroup.HasGroupChanged = true;
 
             if(ParentGroup.Scene.GetNumberOfClients() == 0)
@@ -3219,6 +3311,7 @@ namespace OpenSim.Region.Framework.Scenes
             if (update == PrimUpdateFlags.None)
                 return;
 
+            ++PseudoCRC;
             ParentGroup.HasGroupChanged = true;
 
             if (ParentGroup.Scene.GetNumberOfClients() == 0)
@@ -3290,8 +3383,9 @@ namespace OpenSim.Region.Framework.Scenes
             if (ParentGroup == null)
                 return;
 
+            ++PseudoCRC;
             // Update the "last" values
-            lock(UpdateFlagLock)
+            lock (UpdateFlagLock)
             {
                 m_lastPosition = AbsolutePosition;
                 m_lastRotation = RotationOffset;
@@ -3313,8 +3407,9 @@ namespace OpenSim.Region.Framework.Scenes
             if (ParentGroup == null)
                 return;
 
+            ++PseudoCRC;
             // Update the "last" values
-            lock(UpdateFlagLock)
+            lock (UpdateFlagLock)
             {
                 m_lastPosition = AbsolutePosition;
                 m_lastRotation = RotationOffset;
@@ -3344,7 +3439,7 @@ namespace OpenSim.Region.Framework.Scenes
         private const float VELOCITY_TOLERANCE = 0.1f;
         private const float ANGVELOCITY_TOLERANCE = 0.005f;
         private const float POSITION_TOLERANCE = 0.05f; // I don't like this, but I suppose it's necessary
-        private const double TIME_MS_TOLERANCE = 200.0; //llSetPos has a 200ms delay. This should NOT be 3 seconds.
+        private const double TIME_MS_TOLERANCE = 250.0; //llSetPos has a 200ms delay. This should NOT be 3 seconds.
 
         private Vector3 ClampVectorForTerseUpdate(Vector3 v, float max)
         {
@@ -3913,13 +4008,14 @@ namespace OpenSim.Region.Framework.Scenes
         public void SetGroup(UUID groupID, IClientAPI client)
         {
             // Scene.AddNewPrims() calls with client == null so can't use this.
-//            m_log.DebugFormat(
-//                "[SCENE OBJECT PART]: Setting group for {0} to {1} for {2}",
-//                Name, groupID, OwnerID);
+            // m_log.DebugFormat(
+            //      "[SCENE OBJECT PART]: Setting group for {0} to {1} for {2}",
+            //      Name, groupID, OwnerID);
 
+            ++PseudoCRC;
             GroupID = groupID;
-//            if (client != null)
-//                SendPropertiesToClient(client);
+            // if (client != null)
+            //      SendPropertiesToClient(client);
             lock(UpdateFlagLock)
                 UpdateFlag |= PrimUpdateFlags.FullUpdate;
         }
@@ -3956,26 +4052,18 @@ namespace OpenSim.Region.Framework.Scenes
         /// <param name="events"></param>
         public void SetScriptEvents(UUID scriptid, int events)
         {
-//            m_log.DebugFormat(
-//                "[SCENE OBJECT PART]: Set script events for script with id {0} on {1}/{2} to {3} in {4}",
-//                scriptid, Name, ParentGroup.Name, events, ParentGroup.Scene.Name);
-
+            //            m_log.DebugFormat(
+            //                "[SCENE OBJECT PART]: Set script events for script with id {0} on {1}/{2} to {3} in {4}",
+            //                scriptid, Name, ParentGroup.Name, events, ParentGroup.Scene.Name);
             // scriptEvents oldparts;
             lock (m_scriptEvents)
             {
-                if (m_scriptEvents.ContainsKey(scriptid))
+                if (m_scriptEvents.TryGetValue(scriptid, out scriptEvents ev))
                 {
-                    // oldparts = m_scriptEvents[scriptid];
-
-                    // remove values from aggregated script events
-                    if (m_scriptEvents[scriptid] == (scriptEvents) events)
+                    if (ev == (scriptEvents)events)
                         return;
-                    m_scriptEvents[scriptid] = (scriptEvents) events;
                 }
-                else
-                {
-                    m_scriptEvents.Add(scriptid, (scriptEvents) events);
-                }
+                m_scriptEvents[scriptid] = (scriptEvents) events;
             }
             aggregateScriptEvents();
         }
@@ -4777,15 +4865,7 @@ namespace OpenSim.Region.Framework.Scenes
         private void AddToPhysics(bool isPhysical, bool isPhantom, bool building, bool applyDynamics)
         {
             if (ParentGroup.Scene != null)
-            {
-                float minsize = isPhysical ? ParentGroup.Scene.m_minPhys : ParentGroup.Scene.m_minNonphys;
-                float maxsize = isPhysical ? ParentGroup.Scene.m_maxPhys : ParentGroup.Scene.m_maxNonphys;
-                Vector3 scale = Scale;
-                scale.X = Util.Clamp(scale.X, minsize, maxsize);
-                scale.Y = Util.Clamp(scale.Y, minsize, maxsize);
-                scale.Z = Util.Clamp(scale.Z, minsize, maxsize);
-                Scale = scale;
-            }
+                ClampScale(isPhysical);
 
             PhysicsActor pa;
             Vector3 velocity = Velocity;
@@ -5170,11 +5250,11 @@ namespace OpenSim.Region.Framework.Scenes
 
             bool hassound = (!VolumeDetectActive && CollisionSoundType >= 0 && ((Flags & PrimFlags.Physics) != 0));
 
-            scriptEvents CombinedEvents = AggregateScriptEvents;
+            scriptEvents CombinedEvents = AggregatedScriptEvents;
 
             // merge with root part
             if (ParentGroup != null && ParentGroup.RootPart != null)
-                CombinedEvents |= ParentGroup.RootPart.AggregateScriptEvents;
+                CombinedEvents |= ParentGroup.RootPart.AggregatedScriptEvents;
 
             // submit to this part case
             if (VolumeDetectActive)
@@ -5196,35 +5276,34 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
-
         public void aggregateScriptEvents()
         {
             if (ParentGroup == null || ParentGroup.RootPart == null)
                 return;
 
-            AggregateScriptEvents = 0;
+            AggregatedScriptEvents = 0;
 
             // Aggregate script events
             lock (m_scriptEvents)
             {
                 foreach (scriptEvents s in m_scriptEvents.Values)
                 {
-                    AggregateScriptEvents |= s;
+                    AggregatedScriptEvents |= s;
                 }
             }
 
             uint objectflagupdate = 0;
 
             if (
-                ((AggregateScriptEvents & scriptEvents.touch) != 0) ||
-                ((AggregateScriptEvents & scriptEvents.touch_end) != 0) ||
-                ((AggregateScriptEvents & scriptEvents.touch_start) != 0)
+                ((AggregatedScriptEvents & scriptEvents.touch) != 0) ||
+                ((AggregatedScriptEvents & scriptEvents.touch_end) != 0) ||
+                ((AggregatedScriptEvents & scriptEvents.touch_start) != 0)
                 )
             {
                 objectflagupdate |= (uint) PrimFlags.Touch;
             }
 
-            if ((AggregateScriptEvents & scriptEvents.money) != 0)
+            if ((AggregatedScriptEvents & scriptEvents.money) != 0)
             {
                 objectflagupdate |= (uint) PrimFlags.Money;
             }
@@ -5653,6 +5732,24 @@ namespace OpenSim.Region.Framework.Scenes
                 }
             }
             return false;
+        }
+
+        public int ClearObjectAnimations()
+        {
+            int ret = 0;
+            if(Animations != null)
+            {
+                ret = Animations.Count;
+                Animations.Clear();
+                AnimationsNames.Clear();
+            }
+            else
+            {
+                Animations = new Dictionary<UUID, int>();
+                AnimationsNames = new Dictionary<UUID, string>();
+            }
+            ScheduleUpdate(PrimUpdateFlags.Animations);
+            return ret;
         }
 
         public int GetAnimations(out UUID[] ids, out int[] seqs)
