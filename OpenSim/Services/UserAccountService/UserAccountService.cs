@@ -44,7 +44,6 @@ namespace OpenSim.Services.UserAccountService
     public class UserAccountService : UserAccountServiceBase, IUserAccountService
     {
         private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-        private static readonly UUID UUID_GRID_GOD = new UUID("6571e388-6218-4574-87db-f9379718315e");
         private static UserAccountService m_RootInstance;
 
         /// <summary>
@@ -92,13 +91,13 @@ namespace OpenSim.Services.UserAccountService
                 m_RootInstance = this;
 
                 //  create a system grid god account
-                UserAccount ggod = GetUserAccount(UUID.Zero, UUID_GRID_GOD);
+                UserAccount ggod = GetUserAccount(UUID.Zero, Constants.servicesGodAgentID);
                 if(ggod == null)
                 {
                     UserAccountData d = new UserAccountData();
                     d.FirstName = "GRID";
                     d.LastName = "SERVICES";
-                    d.PrincipalID = UUID_GRID_GOD;
+                    d.PrincipalID = Constants.servicesGodAgentID;
                     d.ScopeID = UUID.Zero;
                     d.Data = new Dictionary<string, string>();
                     d.Data["Email"] = string.Empty;
@@ -157,7 +156,7 @@ namespace OpenSim.Services.UserAccountService
 
             UserAccountData[] d;
 
-            if (scopeID != UUID.Zero)
+            if (!scopeID.IsZero())
             {
                 d = m_Database.Get(
                         new string[] { "ScopeID", "FirstName", "LastName" },
@@ -235,7 +234,7 @@ namespace OpenSim.Services.UserAccountService
         {
             UserAccountData[] d;
 
-            if (scopeID != UUID.Zero)
+            if (!scopeID.IsZero())
             {
                 d = m_Database.Get(
                         new string[] { "ScopeID", "Email" },
@@ -264,7 +263,7 @@ namespace OpenSim.Services.UserAccountService
         {
             UserAccountData[] d;
 
-            if (scopeID != UUID.Zero)
+            if (!scopeID.IsZero())
             {
                 d = m_Database.Get(
                         new string[] { "ScopeID", "PrincipalID" },
@@ -406,7 +405,7 @@ namespace OpenSim.Services.UserAccountService
                     else
                         break;
                 }
-                if (String.IsNullOrWhiteSpace(password))
+                if (string.IsNullOrWhiteSpace(password))
                 {
                     MainConsole.Instance.Output("create user aborted");
                     return;
@@ -592,6 +591,8 @@ namespace OpenSim.Services.UserAccountService
         /// <param name="model"></param>
         public UserAccount CreateUser(UUID scopeID, UUID principalID, string firstName, string lastName, string password, string email, string model = "")
         {
+            firstName = firstName.Trim();
+            lastName = lastName.Trim();
             UserAccount account = GetUserAccount(UUID.Zero, firstName, lastName);
             if (null == account)
             {
@@ -904,7 +905,7 @@ namespace OpenSim.Services.UserAccountService
                 for(int j = 0; j < basewearable.Count; j++)
                 {
                     wearable = basewearable[j];
-                    if (wearable.ItemID != UUID.Zero)
+                    if (!wearable.ItemID.IsZero())
                     {
                         m_log.DebugFormat("[XXX]: Getting item {0} from avie {1} for {2} {3}",
                             wearable.ItemID, source, i, j);
@@ -913,7 +914,7 @@ namespace OpenSim.Services.UserAccountService
 
                         if(item != null && item.AssetType == (int)AssetType.Link)
                         {
-                            if(item.AssetID == UUID.Zero )
+                            if(item.AssetID.IsZero())
                                 item = null;
                             else
                               item = m_InventoryService.GetItem(source, item.AssetID);
@@ -971,7 +972,7 @@ namespace OpenSim.Services.UserAccountService
                 int attachpoint = attachment.AttachPoint;
                 UUID itemID = attachment.ItemID;
 
-                if (itemID != UUID.Zero)
+                if (!itemID.IsZero())
                 {
                     // Get inventory item and copy it
                     InventoryItemBase item = m_InventoryService.GetItem(source, itemID);

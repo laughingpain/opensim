@@ -43,6 +43,8 @@ using LSL_Rotation = OpenSim.Region.ScriptEngine.Shared.LSL_Types.Quaternion;
 using LSL_String = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLString;
 using LSL_Vector = OpenSim.Region.ScriptEngine.Shared.LSL_Types.Vector3;
 
+#pragma warning disable IDE1006
+
 namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
 {
     public partial class ScriptBaseClass : MarshalByRefObject
@@ -961,17 +963,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_LSL_Functions.llGetUsername(id);
         }
 
-        public LSL_Key llRequestUsername(string id)
+        public LSL_Key llRequestUsername(LSL_Key id)
         {
             return m_LSL_Functions.llRequestUsername(id);
         }
 
-        public LSL_String llGetDisplayName(string id)
+        public LSL_String llGetDisplayName(LSL_Key id)
         {
             return m_LSL_Functions.llGetDisplayName(id);
         }
 
-        public LSL_Key llRequestDisplayName(string id)
+        public LSL_Key llRequestDisplayName(LSL_Key id)
         {
             return m_LSL_Functions.llRequestDisplayName(id);
         }
@@ -1336,12 +1338,17 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             m_LSL_Functions.llRemoveVehicleFlags(flags);
         }
 
+        public LSL_Key llRequestUserKey(LSL_String username)
+        {
+            return m_LSL_Functions.llRequestUserKey(username);
+        }
+
         public LSL_Key llRequestAgentData(string id, int data)
         {
             return m_LSL_Functions.llRequestAgentData(id, data);
         }
 
-        public LSL_Key llRequestInventoryData(string name)
+        public LSL_Key llRequestInventoryData(LSL_String name)
         {
             return m_LSL_Functions.llRequestInventoryData(name);
         }
@@ -1921,6 +1928,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             m_LSL_Functions.llTargetRemove(number);
         }
 
+        public void llTargetedEmail(LSL_Integer target, LSL_String subject, LSL_String message)
+        {
+            m_LSL_Functions.llTargetedEmail(target, subject, message);
+        }
+
         public void llTeleportAgent(string agent, string simname, LSL_Vector pos, LSL_Vector lookAt)
         {
             m_LSL_Functions.llTeleportAgent(agent, simname, pos, lookAt);
@@ -2004,6 +2016,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public LSL_Vector llWind(LSL_Vector offset)
         {
             return m_LSL_Functions.llWind(offset);
+        }
+
+        public LSL_String llXorBase64(string str1, string str2)
+        {
+            return m_LSL_Functions.llXorBase64(str1, str2);
         }
 
         public LSL_String llXorBase64Strings(string str1, string str2)
@@ -2164,6 +2181,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public LSL_Rotation llGetRegionMoonRotation()
         {
             return m_LSL_Functions.llGetRegionMoonRotation();
+        }
+
+        public LSL_String llChar(LSL_Integer unicode)
+        {
+            return m_LSL_Functions.llChar(unicode);
+        }
+
+        public LSL_Integer llOrd(LSL_String s, LSL_Integer index)
+        {
+            return m_LSL_Functions.llOrd(s, index);
+        }
+
+        public LSL_Integer llHash(LSL_String s)
+        {
+            return m_LSL_Functions.llHash(s);
         }
     }
 }

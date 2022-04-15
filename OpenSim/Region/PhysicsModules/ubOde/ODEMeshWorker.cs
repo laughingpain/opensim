@@ -4,7 +4,6 @@
 
 using System;
 using System.Collections.Concurrent;
-using System.Threading;
 using OpenSim.Framework;
 using OpenSim.Region.PhysicsModules.SharedBase;
 using log4net;
@@ -65,19 +64,20 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
     public class ODEMeshWorker
     {
-        private ILog m_log;
-        private ODEScene m_scene;
-        private IMesher m_mesher;
+        private readonly ILog m_log;
+        private readonly ODEScene m_scene;
+        private readonly IMesher m_mesher;
 
         public bool meshSculptedPrim = true;
         public float meshSculptLOD = 32;
         public float MeshSculptphysicalLOD = 32;
         public float MinSizeToMeshmerize = 0.1f;
 
-        private BlockingCollection<ODEPhysRepData> workQueue = new BlockingCollection<ODEPhysRepData>();
+        //private static ObjectJobEngine<ODEPhysRepData> workQueue;
+        private ObjectJobEngine workQueue;
         private bool m_running;
 
-        private Thread m_thread;
+        private readonly object m_threadLock = new object();
 
         public ODEMeshWorker(ODEScene pScene, ILog pLog, IMesher pMesher, IConfig pConfig)
         {
@@ -93,38 +93,41 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 MeshSculptphysicalLOD = pConfig.GetFloat("mesh_physical_lod", MeshSculptphysicalLOD);
             }
             m_running = true;
-            m_thread = new Thread(DoWork);
-            m_thread.Name = "OdeMeshWorker";
-            m_thread.Start();
+            Util.FireAndForget(DoCacheExpire, null, "OdeCacheExpire", false);
+            lock(m_threadLock)
+            {
+                if(workQueue == null)
+                    workQueue = new ObjectJobEngine(DoWork, "OdeMeshWorker");
+            }
         }
 
-        private void DoWork()
+        private void DoCacheExpire(object o)
         {
             m_mesher.ExpireFileCache();
-            ODEPhysRepData nextRep;
+        }
 
-            while(m_running)
+        private void Enqueue(ODEPhysRepData rep)
+        {
+            workQueue.Enqueue(rep);
+        }
+
+        private void DoWork(object rep)
+        {
+            ODEPhysRepData nextRep = rep as ODEPhysRepData;
+            if (m_running && nextRep != null && m_scene.haveActor(nextRep.actor))
             {
-                workQueue.TryTake(out nextRep, -1);
-                if(!m_running)
-                    return;
-                if (nextRep == null)
-                    continue;
-                if (m_scene.haveActor(nextRep.actor))
+                switch (nextRep.comand)
                 {
-                    switch (nextRep.comand)
-                    {
-                        case meshWorkerCmnds.changefull:
-                        case meshWorkerCmnds.changeshapetype:
-                        case meshWorkerCmnds.changesize:
-                            GetMesh(nextRep);
-                            if (CreateActorPhysRep(nextRep) && m_scene.haveActor(nextRep.actor))
-                                m_scene.AddChange(nextRep.actor, changes.PhysRepData, nextRep);
-                            break;
-                        case meshWorkerCmnds.getmesh:
-                            DoRepDataGetMesh(nextRep);
-                            break;
-                    }
+                    case meshWorkerCmnds.changefull:
+                    case meshWorkerCmnds.changeshapetype:
+                    case meshWorkerCmnds.changesize:
+                        GetMesh(nextRep);
+                        if (CreateActorPhysRep(nextRep) && m_scene.haveActor(nextRep.actor))
+                            m_scene.AddChange(nextRep.actor, changes.PhysRepData, nextRep);
+                        break;
+                    case meshWorkerCmnds.getmesh:
+                        DoRepDataGetMesh(nextRep);
+                        break;
                 }
             }
         }
@@ -133,8 +136,9 @@ namespace OpenSim.Region.PhysicsModule.ubOde
         {
             try
             {
-                m_thread.Abort();
- //               workQueue.Dispose();
+                m_running = false;
+                workQueue.Dispose();
+                workQueue = null;
             }
             catch
             {
@@ -181,7 +185,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
 
                 // check if we got outdated
 
-                if (!pbs.SculptEntry || pbs.SculptTexture == UUID.Zero)
+                if (!pbs.SculptEntry || pbs.SculptTexture.IsZero())
                 {
                     repData.meshState = MeshState.noNeed;
                     return;
@@ -191,7 +195,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 repData.meshState = MeshState.loadingAsset;
 
                 repData.comand = meshWorkerCmnds.getmesh;
-                workQueue.Add(repData);
+                Enqueue(repData);
             }
         }
 
@@ -237,7 +241,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 if (needsMeshing(repData)) // no need for pbs now?
                 {
                     repData.comand = meshWorkerCmnds.changefull;
-                    workQueue.Add(repData);
+                    Enqueue(repData);
                 }
             }
             else
@@ -252,7 +256,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             if (repData.meshState != MeshState.loadingAsset)
                 return;
 
-            if (repData.assetID == null || repData.assetID == UUID.Zero)
+            if (repData.assetID == null || repData.assetID.Value.IsZero())
                 return;
 
             if (repData.assetID != repData.pbs.SculptTexture)
@@ -436,7 +440,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             {
                 if (pbs.SculptEntry)
                 {
-                    if (pbs.SculptTexture != null && pbs.SculptTexture != UUID.Zero)
+                    if (pbs.SculptTexture != null && !pbs.SculptTexture.IsZero())
                     {
                         repData.assetID = pbs.SculptTexture;
                         repData.meshState = MeshState.needAsset;
@@ -523,7 +527,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
             {
                 if (pbs.SculptEntry)
                 {
-                    if (pbs.SculptTexture == UUID.Zero)
+                    if (pbs.SculptTexture.IsZero())
                         return;
 
                     repData.assetID = pbs.SculptTexture;
@@ -903,7 +907,7 @@ namespace OpenSim.Region.PhysicsModule.ubOde
                 return;
 
             UUID assetID = (UUID) repData.assetID;
-            if (assetID == UUID.Zero)
+            if (assetID.IsZero())
                 return;
 
             repData.meshState = MeshState.loadingAsset;

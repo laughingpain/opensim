@@ -182,7 +182,7 @@ namespace OpenSim.Framework.Servers
 
             if (m_logFileAppender != null && startupConfig != null)
             {
-                string cfgFileName = startupConfig.GetString("LogFile", null);
+                string cfgFileName = startupConfig.GetString("logfile", null);
                 if (cfgFileName != null)
                 {
                     m_logFileAppender.File = cfgFileName;
@@ -325,6 +325,8 @@ namespace OpenSim.Framework.Servers
                 "General", false, "shutdown",
                 "shutdown",
                 "Quit the application", (mod, args) => Shutdown());
+
+            m_console.SetCntrCHandler(Shutdown);
 
             ChecksManager.RegisterConsoleCommands(m_console);
             StatsManager.RegisterConsoleCommands(m_console);
@@ -518,13 +520,10 @@ namespace OpenSim.Framework.Servers
 
         public virtual void HandleShow(string module, string[] cmd)
         {
-            List<string> args = new List<string>(cmd);
+            if(cmd.Length < 2)
+                return;
 
-            args.RemoveAt(0);
-
-            string[] showParams = args.ToArray();
-
-            switch (showParams[0])
+            switch (cmd[1])
             {
                 case "info":
                     ShowInfo();
@@ -551,18 +550,14 @@ namespace OpenSim.Framework.Servers
         /// <param name="cmd"></param>
         private void HandleConfig(string module, string[] cmd)
         {
-            List<string> args = new List<string>(cmd);
-            args.RemoveAt(0);
-            string[] cmdparams = args.ToArray();
-
-            if (cmdparams.Length > 0)
+            if (cmd.Length > 1)
             {
-                string firstParam = cmdparams[0].ToLower();
+                string firstParam = cmd[1].ToLower();
 
                 switch (firstParam)
                 {
                     case "set":
-                        if (cmdparams.Length < 4)
+                        if (cmd.Length < 5)
                         {
                             Notice("Syntax: config set <section> <key> <value>");
                             Notice("Example: config set ScriptEngine.DotNetEngine NumberOfScriptThreads 5");
@@ -571,21 +566,21 @@ namespace OpenSim.Framework.Servers
                         {
                             IConfig c;
                             IConfigSource source = new IniConfigSource();
-                            c = source.AddConfig(cmdparams[1]);
+                            c = source.AddConfig(cmd[2]);
                             if (c != null)
                             {
-                                string _value = String.Join(" ", cmdparams, 3, cmdparams.Length - 3);
-                                c.Set(cmdparams[2], _value);
+                                string _value = String.Join(" ", cmd, 4, cmd.Length - 4);
+                                c.Set(cmd[3], _value);
                                 Config.Merge(source);
 
-                                Notice("In section [{0}], set {1} = {2}", c.Name, cmdparams[2], _value);
+                                Notice("In section [{0}], set {1} = {2}", c.Name, cmd[3], _value);
                             }
                         }
                         break;
 
                     case "get":
                     case "show":
-                        if (cmdparams.Length == 1)
+                        if (cmd.Length == 2)
                         {
                             foreach (IConfig config in Config.Configs)
                             {
@@ -595,17 +590,17 @@ namespace OpenSim.Framework.Servers
                                     Notice("  {0} = {1}", key, config.GetString(key));
                             }
                         }
-                        else if (cmdparams.Length == 2 || cmdparams.Length == 3)
+                        else if (cmd.Length == 3 || cmd.Length == 4)
                         {
-                            IConfig config = Config.Configs[cmdparams[1]];
+                            IConfig config = Config.Configs[cmd[2]];
                             if (config == null)
                             {
-                                Notice("Section \"{0}\" does not exist.",cmdparams[1]);
+                                Notice("Section \"{0}\" does not exist.",cmd[2]);
                                 break;
                             }
                             else
                             {
-                                if (cmdparams.Length == 2)
+                                if (cmd.Length == 3)
                                 {
                                     Notice("[{0}]", config.Name);
                                     foreach (string key in config.GetKeys())
@@ -615,7 +610,7 @@ namespace OpenSim.Framework.Servers
                                 {
                                     Notice(
                                         "config get {0} {1} : {2}",
-                                        cmdparams[1], cmdparams[2], config.GetString(cmdparams[2]));
+                                        cmd[2], cmd[3], config.GetString(cmd[3]));
                                 }
                             }
                         }
@@ -628,13 +623,13 @@ namespace OpenSim.Framework.Servers
                         break;
 
                     case "save":
-                        if (cmdparams.Length < 2)
+                        if (cmd.Length < 3)
                         {
                             Notice("Syntax: config save <path>");
                             return;
                         }
 
-                        string path = cmdparams[1];
+                        string path = cmd[2];
                         Notice("Saving configuration file: {0}", path);
 
                         if (Config is IniConfigSource)
@@ -722,7 +717,7 @@ namespace OpenSim.Framework.Servers
                     while ((currentCommand = readFile.ReadLine()) != null)
                     {
                         currentCommand = currentCommand.Trim();
-                        if (!(currentCommand == ""
+                        if (!(currentCommand.Length == 0
                             || currentCommand.StartsWith(";")
                             || currentCommand.StartsWith("//")
                             || currentCommand.StartsWith("#")))
@@ -763,20 +758,10 @@ namespace OpenSim.Framework.Servers
         {
             string buildVersion = string.Empty;
 
-            // The subversion information is deprecated and will be removed at a later date
-            // Add subversion revision information if available
-            // Try file "svn_revision" in the current directory first, then the .svn info.
-            // This allows to make the revision available in simulators not running from the source tree.
-            // FIXME: Making an assumption about the directory we're currently in - we do this all over the place
-            // elsewhere as well
+            string manualVersionFileName = ".version";
+
             string gitDir = "../.git/";
             string gitRefPointerPath = gitDir + "HEAD";
-
-            string svnRevisionFileName = "svn_revision";
-            string svnFileName = ".svn/entries";
-            string manualVersionFileName = ".version";
-            string inputLine;
-            int strcmp;
 
             if (File.Exists(manualVersionFileName))
             {
@@ -815,40 +800,6 @@ namespace OpenSim.Framework.Servers
                         }
                     }
                 }
-            }
-            else
-            {
-                // Remove the else logic when subversion mirror is no longer used
-                if (File.Exists(svnRevisionFileName))
-                {
-                    StreamReader RevisionFile = File.OpenText(svnRevisionFileName);
-                    buildVersion = RevisionFile.ReadLine();
-                    buildVersion = buildVersion.Trim();
-                    RevisionFile.Close();
-                }
-
-                if (string.IsNullOrEmpty(buildVersion) && File.Exists(svnFileName))
-                {
-                    StreamReader EntriesFile = File.OpenText(svnFileName);
-                    inputLine = EntriesFile.ReadLine();
-                    while (inputLine != null)
-                    {
-                        // using the dir svn revision at the top of entries file
-                        strcmp = String.Compare(inputLine, "dir");
-                        if (strcmp == 0)
-                       {
-                            buildVersion = EntriesFile.ReadLine();
-                            break;
-                        }
-                        else
-                        {
-                            inputLine = EntriesFile.ReadLine();
-                        }
-                    }
-                    EntriesFile.Close();
-                }
-
-                m_version += string.IsNullOrEmpty(buildVersion) ? "      " : ("." + buildVersion + "     ").Substring(0, 6);
             }
         }
 
@@ -897,7 +848,7 @@ namespace OpenSim.Framework.Servers
             sb.Append("\n");
             int totalThreads = Process.GetCurrentProcess().Threads.Count;
             if (totalThreads > 0)
-                sb.AppendFormat("Total process threads active: {0}\n\n", totalThreads);
+                sb.AppendFormat("Total process threads: {0}\n\n", totalThreads);
 
             return sb.ToString();
         }

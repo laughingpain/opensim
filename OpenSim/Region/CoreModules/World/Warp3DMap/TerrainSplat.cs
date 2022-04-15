@@ -104,7 +104,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                 // Swap empty terrain textureIDs with default IDs
                 for(int i = 0; i < textureIDs.Length; i++)
                 {
-                    if(textureIDs[i] == UUID.Zero)
+                    if(textureIDs[i].IsZero())
                         textureIDs[i] = DEFAULT_TERRAIN_DETAIL[i];
                 }
 
@@ -117,7 +117,7 @@ namespace OpenSim.Region.CoreModules.World.Warp3DMap
                         AssetBase asset = null;
 
                         // asset cache indexes are strings
-                        string cacheName ="MAP-Patch" + textureIDs[i].ToString();
+                        string cacheName ="MAP" + textureIDs[i].ToString();
 
                         // Try to fetch a cached copy of the decoded/resized version of this texture
                         asset = assetService.GetCached(cacheName);

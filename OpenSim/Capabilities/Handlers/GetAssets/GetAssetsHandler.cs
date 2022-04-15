@@ -30,6 +30,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Net;
 using System.Reflection;
+using System.Threading;
 using log4net;
 using Nini.Config;
 using OpenMetaverse;
@@ -77,12 +78,13 @@ namespace OpenSim.Capabilities.Handlers
             m_assetService = assService;
         }
 
-        public void Handle(OSHttpRequest req, OSHttpResponse response)
+        public void Handle(OSHttpRequest req, OSHttpResponse response, string serviceURL = null)
         {
             response.ContentType = "text/plain";
 
             if (m_assetService == null)
             {
+                //m_log.Warn("[GETASSET]: no service"); 
                 response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
                 response.KeepAlive = false;
                 return;
@@ -98,9 +100,8 @@ namespace OpenSim.Capabilities.Handlers
             string assetStr = string.Empty;
             foreach (KeyValuePair<string,string> kvp in queries)
             {
-                if (queryTypes.ContainsKey(kvp.Key))
+                if (queryTypes.TryGetValue(kvp.Key, out type))
                 {
-                    type = queryTypes[kvp.Key];
                     assetStr = kvp.Value;
                     break;
                 }
@@ -114,56 +115,72 @@ namespace OpenSim.Capabilities.Handlers
                 return;
             }
 
-            if (String.IsNullOrEmpty(assetStr))
+            if (string.IsNullOrEmpty(assetStr))
                 return;
 
             UUID assetID = UUID.Zero;
             if(!UUID.TryParse(assetStr, out assetID))
                 return;
 
-            AssetBase asset = m_assetService.Get(assetID.ToString());
-            if(asset == null)
+            ManualResetEventSlim done = new ManualResetEventSlim(false);
+            AssetBase asset = null;
+            m_assetService.Get(assetID.ToString(), serviceURL, false, (AssetBase a) =>
+                {
+                    asset = a;
+                    done.Set();
+                });
+
+            done.Wait();
+            done.Dispose();
+            done = null;
+
+            if (asset == null)
             {
                 // m_log.Warn("[GETASSET]: not found: " + query + " " + assetStr);
                 response.StatusCode = (int)HttpStatusCode.NotFound;
                 return;
             }
 
-            if (asset.Type != (sbyte)type)
-                return;
-
             int len = asset.Data.Length;
 
-            string range = null;
-            if (req.Headers["Range"] != null)
-                range = req.Headers["Range"];
-            else if (req.Headers["range"] != null)
-                range = req.Headers["range"];
+            if (len == 0)
+            {
+                m_log.Warn("[GETASSET]: asset with empty data: " + assetStr + " type " + asset.Type.ToString());
+                response.StatusCode = (int)HttpStatusCode.NotFound;
+                return;
+            }
+
+            if (asset.Type != (sbyte)type)
+            {
+                m_log.Warn("[GETASSET]: asset with wrong type: " + assetStr + " " + asset.Type.ToString() + " != " + ((sbyte)type).ToString());
+                //response.StatusCode = (int)HttpStatusCode.NotFound;
+                //return;
+            }
 
             // range request
-            int start, end;
-            if (Util.TryParseHttpRange(range, out start, out end))
+            if (Util.TryParseHttpRange(req.Headers["range"], out int start, out int end))
             {
-                // Before clamping start make sure we can satisfy it in order to avoid
-                // sending back the last byte instead of an error status
-                if (start >= asset.Data.Length)
+                // viewers do send broken start, then flag good assets as bad
+                if (start >= len)
                 {
-                    response.StatusCode = (int)HttpStatusCode.RequestedRangeNotSatisfiable;
-                    return;
+                    //m_log.Warn("[GETASSET]: bad start: " + range);
+                    response.StatusCode = (int)HttpStatusCode.OK;
                 }
-
-                if (end == -1)
-                    end = asset.Data.Length - 1;
                 else
-                    end = Utils.Clamp(end, 0, asset.Data.Length - 1);
+                {
+                    if (end == -1)
+                        end = len - 1;
+                    else
+                        end = Utils.Clamp(end, 0, len - 1);
 
-                start = Utils.Clamp(start, 0, end);
-                len = end - start + 1;
+                    start = Utils.Clamp(start, 0, end);
+                    len = end - start + 1;
 
-                //m_log.Debug("Serving " + start + " to " + end + " of " + texture.Data.Length + " bytes for texture " + texture.ID);
-                response.AddHeader("Content-Range", String.Format("bytes {0}-{1}/{2}", start, end, asset.Data.Length));
-                response.StatusCode = (int)HttpStatusCode.PartialContent;
-                response.RawBufferStart = start;
+                    //m_log.Debug("Serving " + start + " to " + end + " of " + texture.Data.Length + " bytes for texture " + texture.ID);
+                    response.AddHeader("Content-Range", string.Format("bytes {0}-{1}/{2}", start, end, asset.Data.Length));
+                    response.StatusCode = (int)HttpStatusCode.PartialContent;
+                    response.RawBufferStart = start;
+                }
             }
             else
                 response.StatusCode = (int)HttpStatusCode.OK;
@@ -172,19 +189,9 @@ namespace OpenSim.Capabilities.Handlers
             response.RawBuffer = asset.Data;
             response.RawBufferLen = len;
             if (type == AssetType.Mesh || type == AssetType.Texture)
-            {
-                if(len > 8196)
-                {
-                    //if(type == AssetType.Texture && ((asset.Flags & AssetFlags.AvatarBake)!= 0))
-                    //    responsedata["prio"] = 1;
-                    //else
-                    response.Priority = 2;
-                }
-                else
-                    response.Priority = 1;
-            }
+                response.Priority = 2;
             else
-                response.Priority = -1;
+                response.Priority = 1;
         }
     }
 }

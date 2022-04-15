@@ -1025,19 +1025,12 @@ namespace OpenSim.Region.OptionalModules.Agent.InternetRelayClientView.Server
         {
         }
 
-        public void SendCloudData(int version, float[] cloudCover)
-        {
-
-        }
-
         public void MoveAgentIntoRegion(RegionInfo regInfo, Vector3 pos, Vector3 look)
         {
-
         }
 
         public void InformClientOfNeighbour(ulong neighbourHandle, IPEndPoint neighbourExternalEndPoint)
         {
-
         }
 
         public AgentCircuitData RequestClientInfo()
@@ -1142,7 +1135,10 @@ namespace OpenSim.Region.OptionalModules.Agent.InternetRelayClientView.Server
 
         public void SendRemoveInventoryItem(UUID itemID)
         {
+        }
 
+        public void SendRemoveInventoryItems(UUID[] items)
+        {
         }
 
         public void SendTakeControls(int controls, bool passToAgent, bool TakeControls)
@@ -1155,9 +1151,12 @@ namespace OpenSim.Region.OptionalModules.Agent.InternetRelayClientView.Server
 
         }
 
-        public void SendBulkUpdateInventory(InventoryNodeBase node)
+        public void SendBulkUpdateInventory(InventoryNodeBase node, UUID? transactionID = null)
         {
+        }
 
+        public void SendBulkUpdateInventory(InventoryFolderBase[] folders, InventoryItemBase[] items)
+        {
         }
 
         public void SendXferPacket(ulong xferID, uint packet, 
@@ -1468,7 +1467,7 @@ namespace OpenSim.Region.OptionalModules.Agent.InternetRelayClientView.Server
         }
         public byte[] GetThrottlesPacked(float multiplier)
         {
-            return new byte[0];
+            return Array.Empty<byte>();
         }
 
 #pragma warning disable 0067

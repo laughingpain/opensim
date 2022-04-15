@@ -117,7 +117,7 @@ namespace OpenSim.Services.HypergridService
 
                 m_BypassClientVerification = serverConfig.GetBoolean("BypassClientVerification", false);
 
-                if (gridService == string.Empty || gridUserService == string.Empty || gatekeeperService == string.Empty)
+                if (gridService.Length == 0 || gridUserService.Length == 0 || gatekeeperService.Length == 0)
                     throw new Exception(String.Format("Incomplete specifications, UserAgent Service cannot function."));
 
                 Object[] args = new Object[] { config };
@@ -141,7 +141,7 @@ namespace OpenSim.Services.HypergridService
                 if (string.IsNullOrEmpty(m_GridName)) // Legacy. Remove soon.
                 {
                     m_GridName = serverConfig.GetString("ExternalName", string.Empty);
-                    if (m_GridName == string.Empty)
+                    if (m_GridName.Length == 0)
                     {
                         serverConfig = config.Configs["GatekeeperService"];
                         m_GridName = serverConfig.GetString("ExternalName", string.Empty);
@@ -211,7 +211,7 @@ namespace OpenSim.Services.HypergridService
             GridUserInfo uinfo = m_GridUserService.GetGridUserInfo(userID.ToString());
             if (uinfo != null)
             {
-                if (uinfo.HomeRegionID != UUID.Zero)
+                if (!uinfo.HomeRegionID.IsZero())
                 {
                     home = m_GridService.GetRegionByUUID(UUID.Zero, uinfo.HomeRegionID);
                     position = uinfo.HomePosition;
@@ -290,7 +290,7 @@ namespace OpenSim.Services.HypergridService
 
             m_log.DebugFormat("[USER AGENT SERVICE]: this grid: {0}, desired grid: {1}, desired region: {2}", m_GridName, gridName, region.RegionID);
 
-            if (m_GridName == gridName)
+            if (m_GridName.Equals(gridName, StringComparison.InvariantCultureIgnoreCase))
             {
                 success = m_GatekeeperService.LoginAgent(source, agentCircuit, finalDestination, out reason);
             }
@@ -459,7 +459,7 @@ namespace OpenSim.Services.HypergridService
             {
                 PresenceInfo friendSession = null;
                 foreach (PresenceInfo pinfo in friendSessions)
-                    if (pinfo.RegionID != UUID.Zero) // let's guard against traveling agents
+                    if (!pinfo.RegionID.IsZero()) // let's guard against traveling agents
                     {
                         friendSession = pinfo;
                         break;
@@ -644,19 +644,21 @@ namespace OpenSim.Services.HypergridService
                 return targetUserID.ToString() + ";" + m_GridName + ";" + account.FirstName + " " + account.LastName ;
 
             // Let's try the list of friends
-            FriendInfo[] friends = m_FriendsService.GetFriends(userID);
-            if (friends != null && friends.Length > 0)
+            if(m_FriendsService != null)
             {
-                foreach (FriendInfo f in friends)
-                    if (f.Friend.StartsWith(targetUserID.ToString()))
-                    {
-                        // Let's remove the secret
-                        UUID id; string tmp = string.Empty, secret = string.Empty;
-                        if (Util.ParseUniversalUserIdentifier(f.Friend, out id, out tmp, out tmp, out tmp, out secret))
-                            return f.Friend.Replace(secret, "0");
-                    }
+                FriendInfo[] friends = m_FriendsService.GetFriends(userID);
+                if (friends != null && friends.Length > 0)
+                {
+                    foreach (FriendInfo f in friends)
+                        if (f.Friend.StartsWith(targetUserID.ToString()))
+                        {
+                            // Let's remove the secret
+                            UUID id; string tmp = string.Empty, secret = string.Empty;
+                            if (Util.ParseUniversalUserIdentifier(f.Friend, out id, out tmp, out tmp, out tmp, out secret))
+                                return f.Friend.Replace(secret, "0");
+                        }
+                }
             }
-
             return string.Empty;
         }
 

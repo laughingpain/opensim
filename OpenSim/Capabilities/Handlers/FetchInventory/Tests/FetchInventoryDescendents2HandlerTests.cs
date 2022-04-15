@@ -131,10 +131,11 @@ namespace OpenSim.Capabilities.Handlers.FetchInventory.Tests
         {
             TestOSHttpRequest req = new TestOSHttpRequest();
             TestOSHttpResponse resp = new TestOSHttpResponse();
+            using(ExpiringKey<UUID> bad = new ExpiringKey<UUID>(5000)) // bad but this is test
             using (MemoryStream ms = new MemoryStream(Utils.StringToBytes(request), false))
             {
                 req.InputStream = ms;
-                handler.FetchInventoryDescendentsRequest(req, resp);
+                handler.FetchInventoryDescendentsRequest(req, resp, bad);
             }
             return Util.UTF8.GetString(resp.RawBuffer);
         }
@@ -262,13 +263,16 @@ namespace OpenSim.Capabilities.Handlers.FetchInventory.Tests
 
             string root_folder = "<key>folder_id</key><uuid>" + m_rootFolderID + "</uuid>";
             string notecards_folder = "<key>folder_id</key><uuid>" + m_notecardsFolder + "</uuid>";
+            string notecards_category = "<key>category_id</key><uuid>" + m_notecardsFolder + "</uuid>";
 
             Assert.That(llsdresponse.Contains(root_folder), "Missing root folder");
             Assert.That(llsdresponse.Contains(notecards_folder), "Missing notecards folder");
             int count = Regex.Matches(llsdresponse, root_folder).Count;
             Assert.AreEqual(1, count, "More than 1 root folder in response");
             count = Regex.Matches(llsdresponse, notecards_folder).Count;
-            Assert.AreEqual(2, count, "More than 1 notecards folder in response"); // Notecards will also be under root, so 2
+            Assert.AreEqual(1, count, "More than 1 notecards folder in response");
+            count = Regex.Matches(llsdresponse, notecards_category).Count;
+            Assert.AreEqual(1, count, "More than 1 notecards folder in response"); // Notecards will also be a category on root
         }
 
         [Test]

@@ -25,6 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#pragma warning disable IDE1006
+
 using System;
 using System.Collections;
 using OpenSim.Region.ScriptEngine.Interfaces;
@@ -142,7 +144,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         void osRegionNotice(string msg);
         void osRegionNotice(LSL_Key agentID, string msg);
         bool osConsoleCommand(string Command);
-        void osSetParcelMediaURL(string url);
+        void osSetParcelMusicURL(LSL_String url);
+        void osSetParcelMediaURL(LSL_String url);
         void osSetPrimFloatOnWater(int floatYN);
         void osSetParcelSIPAddress(string SIPAddress);
 
@@ -244,13 +247,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         string osSetPenCap(string drawList, string direction, string type);
         string osDrawImage(string drawList, int width, int height, string imageUrl);
         vector osGetDrawStringSize(string contentType, string text, string fontName, int fontSize);
-        void osSetStateEvents(int events);
 
         void osSetRegionWaterHeight(double height);
         void osSetRegionSunSettings(bool useEstateSun, bool sunFixed, double sunHour);
         void osSetEstateSunSettings(bool sunFixed, double sunHour);
         LSL_Float osGetCurrentSunHour();
-        double osGetSunParam(string param);
+        LSL_Float osGetSunParam(LSL_String param);
         double osSunGetParam(string param); // Deprecated
         void osSetSunParam(string param, double value);
         void osSunSetParam(string param, double value); // Deprecated
@@ -275,7 +277,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
 
         void osMessageObject(key objectUUID,string message);
 
-        void osMakeNotecard(string notecardName, LSL_Types.list contents);
+        void osMakeNotecard(string notecardName, LSL_String contents);
+        void osMakeNotecard(string notecardName, LSL_List contents);
 
         string osGetNotecardLine(string name, int line);
         string osGetNotecard(string name);
@@ -283,6 +286,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
 
         string osAvatarName2Key(string firstname, string lastname);
         string osKey2Name(string id);
+        string osSHA256(string input);
 
         // Grid Info Functions
         string osGetGridNick();
@@ -498,8 +502,8 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         /// <returns>boolean</returns>
         LSL_Integer osRegexIsMatch(string input, string pattern);
 
-        LSL_String osRequestURL(LSL_List options);
-        LSL_String osRequestSecureURL(LSL_List options);
+        LSL_Key osRequestURL(LSL_List options);
+        LSL_Key osRequestSecureURL(LSL_List options);
         void osCollisionSound(string impact_sound, double impact_volume);
 
         void osVolumeDetect(int detect);
@@ -509,7 +513,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         void osSetInertia(LSL_Float mass, vector centerOfMass, vector principalInertiaScaled,  rotation rot);
         void osSetInertiaAsBox(LSL_Float mass, vector boxSize, vector centerOfMass, rotation rot);
         void osSetInertiaAsSphere(LSL_Float mass,  LSL_Float radius, vector centerOfMass);
-        void osSetInertiaAsCylinder(LSL_Float mass,  LSL_Float radius, LSL_Float lenght, vector centerOfMass,rotation lslrot);
+        void osSetInertiaAsCylinder(LSL_Float mass,  LSL_Float radius, LSL_Float length, vector centerOfMass,rotation lslrot);
 
         LSL_Integer osTeleportObject(LSL_Key objectUUID, vector targetPos, rotation targetrotation, LSL_Integer flags);
         LSL_Integer osGetLinkNumber(LSL_String name);
@@ -560,6 +564,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_Key osGetLastChangedEventKey();
         LSL_Float osGetPSTWallclock();
         LSL_Rotation osSlerp(LSL_Rotation a, LSL_Rotation b, LSL_Float amount);
+        vector osSlerp(vector a, vector b, LSL_Float amount);
 
         void osResetAllScripts(LSL_Integer AllLinkset);
         LSL_Integer osIsNotValidNumber(LSL_Float v);
@@ -574,15 +579,24 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         vector osGetLinkStandTarget(LSL_Integer linkNumber);
         LSL_Integer osClearObjectAnimations();
 
-        LSL_Float osGetApparentTime();
+        LSL_Float  osGetApparentTime();
         LSL_String osGetApparentTimeString(LSL_Integer format24);
-        LSL_Float osGetApparentRegionTime();
+        LSL_Float  osGetApparentRegionTime();
         LSL_String osGetApparentRegionTimeString(LSL_Integer format24);
 
         LSL_Integer osReplaceAgentEnvironment(LSL_Key agentkey, LSL_Integer transition, LSL_String daycycle);
         LSL_Integer osReplaceParcelEnvironment(LSL_Integer transition, LSL_String daycycle);
         LSL_Integer osReplaceRegionEnvironment(LSL_Integer transition, LSL_String daycycle,
-           LSL_Float daylen, LSL_Float dayoffset, LSL_Float altitude1, LSL_Float altitude2, LSL_Float altitude3);
+          LSL_Float daylen, LSL_Float dayoffset, LSL_Float altitude1, LSL_Float altitude2, LSL_Float altitude3);
         LSL_Integer osResetEnvironment(LSL_Integer parcelOrRegion, LSL_Integer transition);
+
+        void osParticleSystem(LSL_List rules);
+        void osLinkParticleSystem(LSL_Integer linknumber, LSL_List rules);
+
+        LSL_Integer osNpcLookAt(LSL_Key npckey, LSL_Integer type, LSL_Key objkey, vector offset);
+
+        LSL_Integer osAvatarType(LSL_Key avkey);
+        LSL_Integer osAvatarType(LSL_String sFirstName, LSL_String sLastName);
+        void osListSortInPlace(LSL_List src, LSL_Integer stride, LSL_Integer ascending);
     }
 }

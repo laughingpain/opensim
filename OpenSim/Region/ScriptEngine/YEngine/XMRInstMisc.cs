@@ -26,25 +26,12 @@
  */
 
 using System;
-using System.Threading;
-using System.Reflection;
-using System.Collections;
-using System.Collections.Generic;
-using System.Reflection.Emit;
-using System.Runtime.Remoting.Lifetime;
-using System.Security.Policy;
 using System.IO;
-using System.Xml;
 using System.Text;
 using OpenMetaverse;
-using OpenSim.Framework;
-using OpenSim.Region.ScriptEngine.Interfaces;
 using OpenSim.Region.ScriptEngine.Shared;
 using OpenSim.Region.ScriptEngine.Shared.Api;
-using OpenSim.Region.ScriptEngine.Shared.ScriptBase;
-using OpenSim.Region.ScriptEngine.Yengine;
 using OpenSim.Region.Framework.Scenes;
-using log4net;
 
 using LSL_Float = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLFloat;
 using LSL_Integer = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLInteger;
@@ -178,10 +165,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 sb.AppendLine("    m_StateCode          = " + GetStateName(stateCode));
                 sb.AppendLine("    eventCode            = " + eventCode.ToString());
                 sb.AppendLine("    m_LastRanAt          = " + m_LastRanAt.ToString());
-                sb.AppendLine("    m_RunOnePhase        = " + m_RunOnePhase);
+                //sb.AppendLine("    m_RunOnePhase        = " + m_RunOnePhase);
                 sb.AppendLine("    suspOnCkRunHold      = " + suspendOnCheckRunHold);
                 sb.AppendLine("    suspOnCkRunTemp      = " + suspendOnCheckRunTemp);
-                sb.AppendLine("    m_CheckRunPhase      = " + m_CheckRunPhase);
+                //sb.AppendLine("    m_CheckRunPhase      = " + m_CheckRunPhase);
                 sb.AppendLine("    heapUsed/Limit       = " + xmrHeapUsed() + "/" + heapLimit);
                 sb.AppendLine("    m_InstEHEvent        = " + m_InstEHEvent.ToString());
                 sb.AppendLine("    m_InstEHSlice        = " + m_InstEHSlice.ToString());
@@ -213,24 +200,23 @@ namespace OpenSim.Region.ScriptEngine.Yengine
          * @brief For a given stateCode, get a mask of the low 32 event codes
          *        that the state has handlers defined for.
          */
-        public int GetStateEventFlags(int stateCode)
+        public ulong GetStateEventFlags(int state)
         {
-            if((stateCode < 0) ||
-                (stateCode >= m_ObjCode.scriptEventHandlerTable.GetLength(0)))
+            if((state < 0) ||
+                (state >= m_ObjCode.scriptEventHandlerTable.GetLength(0)))
             {
                 return 0;
             }
 
-            int code = 0;
-            for(int i = 0; i < 32; i++)
+            ulong flags = 0;
+            for(int i = 0; i <(int)ScriptEventCode.Size; i++)
             {
-                if(m_ObjCode.scriptEventHandlerTable[stateCode, i] != null)
+                if(m_ObjCode.scriptEventHandlerTable[state, i] != null)
                 {
-                    code |= 1 << i;
+                    flags |= 1ul << i;
                 }
             }
-
-            return code;
+            return flags;
         }
 
         /**
@@ -402,11 +388,14 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     }
                     else
                     {
-                        if(m_IState == XMRInstState.ONSLEEPQ)
+                        if (m_IState == XMRInstState.ONSLEEPQ)
                         {
                             m_Engine.RemoveFromSleep(this);
                             m_IState = XMRInstState.SUSPENDED;
                         }
+                        else if (m_IState == XMRInstState.IDLE)
+                            m_IState = XMRInstState.SUSPENDED;
+
                         EmptyEventQueues();
                     }
                 }

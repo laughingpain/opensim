@@ -209,7 +209,7 @@ namespace OpenSim.Framework.Servers
                 Environment.Exit(1);
             }
 
-            TimeSpan timeTaken = DateTime.Now - m_startuptime;
+            //TimeSpan timeTaken = DateTime.Now - m_startuptime;
 
 //            MainConsole.Instance.OutputFormat(
 //                "PLEASE WAIT FOR LOGINS TO BE ENABLED ON REGIONS ONCE SCRIPTS HAVE STARTED.  Non-script portion of startup took {0}m {1}s.",
@@ -224,14 +224,16 @@ namespace OpenSim.Framework.Servers
 
         public string StatReport(IOSHttpRequest httpRequest)
         {
+            httpRequest.QueryAsDictionary.TryGetValue("region", out string id);
+
             // If we catch a request for "callback", wrap the response in the value for jsonp
-            if (httpRequest.Query.ContainsKey("callback"))
+            if (httpRequest.QueryAsDictionary.TryGetValue("callback", out string cb) && ! string.IsNullOrEmpty(cb))
             {
-                return httpRequest.Query["callback"].ToString() + "(" + StatsManager.SimExtraStats.XReport((DateTime.Now - m_startuptime).ToString() , m_version) + ");";
+                return cb + "(" + StatsManager.SimExtraStats.XReport((DateTime.Now - m_startuptime).ToString() , m_version, id) + ");";
             }
             else
             {
-                return StatsManager.SimExtraStats.XReport((DateTime.Now - m_startuptime).ToString() , m_version);
+                return StatsManager.SimExtraStats.XReport((DateTime.Now - m_startuptime).ToString() , m_version, id);
             }
         }
     }

@@ -219,7 +219,7 @@ namespace OpenSim.Server.Base
         public static T LoadPlugin<T> (string dllName, Object[] args) where T:class
         {
             // This is good to debug configuration problems
-            //if (dllName == string.Empty)
+            //if (dllName.Length == 0)
             //    Util.PrintCallStack();
 
             string className = String.Empty;
@@ -560,6 +560,29 @@ namespace OpenSim.Server.Base
             catch (Exception e)
             {
                 m_log.DebugFormat("[serverUtils.ParseXmlResponse]: failed error: {0}\n --string:\n{1}\n", e.Message, data);
+            }
+            return new Dictionary<string, object>();
+        }
+
+        public static Dictionary<string, object> ParseXmlResponse(Stream src)
+        {
+            //m_log.DebugFormat("[XXX]: received xml string: {0}", data);
+
+            try
+            {
+                XmlReaderSettings xset = new XmlReaderSettings() { IgnoreWhitespace = true, IgnoreComments = true, ConformanceLevel = ConformanceLevel.Fragment, CloseInput = true };
+                XmlParserContext xpc = new XmlParserContext(null, null, null, XmlSpace.None);
+                xpc.Encoding = Util.UTF8NoBomEncoding;
+                using (XmlReader xr = XmlReader.Create(src, xset, xpc))
+                {
+                    if (!xr.ReadToFollowing("ServerResponse"))
+                        return new Dictionary<string, object>();
+                    return ScanXmlResponse(xr);
+                }
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[serverUtils.ParseXmlResponse]: failed error: {0}", e.Message);
             }
             return new Dictionary<string, object>();
         }

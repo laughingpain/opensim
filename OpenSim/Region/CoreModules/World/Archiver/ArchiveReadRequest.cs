@@ -221,7 +221,8 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             m_rotation = options.ContainsKey("rotation") ? (float)options["rotation"] : 0f;
 
             m_boundingOrigin = Vector3.Zero;
-            m_boundingSize = new Vector3(scene.RegionInfo.RegionSizeX, scene.RegionInfo.RegionSizeY, float.MaxValue);
+            m_boundingOrigin.Z = Constants.MinSimulationHeight;
+            m_boundingSize = new Vector3(scene.RegionInfo.RegionSizeX, scene.RegionInfo.RegionSizeY, Constants.MaxSimulationHeight - Constants.MinSimulationHeight);
 
             if (options.ContainsKey("bounding-origin"))
             {
@@ -284,6 +285,91 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             m_assetService = m_rootScene.AssetService;
         }
 
+        public struct assetfileInfo
+        {
+            public string path;
+            public byte[] data;
+        }
+
+        private void loadNeededAssets(assetfileInfo[] assetsFiles, int count, ref int successfulAssetRestores,
+            ref int failedAssetRestores, ref int skipedAssetRestores)
+        {
+            List<string> ids = new List<string>(count);
+            List<UUID> uuids = new List<UUID>(count);
+            List<sbyte> types = new List<sbyte>(count);
+            List<byte[]> datas = new List<byte[]>(count);
+
+            for (int i = 0; i < count; ++i)
+            {
+                string assetPath = assetsFiles[i].path;
+                byte[] data = assetsFiles[i].data;
+
+                assetsFiles[i].path = null;
+                assetsFiles[i].data = null;
+
+                string filename = assetPath.Substring(ArchiveConstants.ASSETS_PATH.Length);
+                int indx = filename.LastIndexOf(ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
+                if (indx < 0)
+                {
+                    m_log.ErrorFormat(
+                        "[ARCHIVER]: Could not find extension information in asset path {0} since it's missing the separator {1}.  Skipping",
+                        assetPath, ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
+                    failedAssetRestores++;
+                    continue;
+                }
+                string extension = filename.Substring(indx);
+                if (ArchiveConstants.EXTENSION_TO_ASSET_TYPE.ContainsKey(extension))
+                {
+                    string id = filename.Remove(indx);
+                    if (UUID.TryParse(id, out UUID uuid))
+                    {
+                        ids.Add(id);
+                        uuids.Add(uuid);
+                        datas.Add(data);
+                        types.Add(ArchiveConstants.EXTENSION_TO_ASSET_TYPE[extension]);
+                        continue;
+                    }
+                }
+                failedAssetRestores++;
+            }
+
+            bool[] exits = m_assetService.AssetsExist(ids.ToArray());
+            ids.Clear();
+
+            if (exits == null)
+            {
+                m_log.Error("[ARCHIVER]: asset service AssetsExists failed");
+                failedAssetRestores += uuids.Count;
+                return;
+            }
+
+            if (exits.Length != uuids.Count)
+            {
+                m_log.Error("[ARCHIVER]: asset service AssetsExists return size mismatch");
+                failedAssetRestores += uuids.Count;
+                return;
+            }
+
+            for (int i = 0; i < uuids.Count; ++i)
+            {
+                if (exits[i])
+                {
+                    ++skipedAssetRestores;
+                }
+                else
+                {
+                    if (TryUploadAsset(uuids[i],types[i], datas[i]))
+                        successfulAssetRestores++;
+                    else
+                        failedAssetRestores++;
+                }
+
+                int tot = successfulAssetRestores + failedAssetRestores + skipedAssetRestores;
+                if (tot % 250 == 0)
+                    m_log.Debug("[ARCHIVER]:  done " + tot  + "; uploaded: " + successfulAssetRestores + " skipped: " + skipedAssetRestores + " failed: "+ failedAssetRestores + " assets...");
+            }
+        }
+
         /// <summary>
         /// Dearchive the region embodied in this request.
         /// </summary>
@@ -295,6 +381,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
         public void DearchiveRegion(bool shouldStartScripts)
         {
             int successfulAssetRestores = 0;
+            int skippedAssetRestores = 0;
             int failedAssetRestores = 0;
 
             DearchiveScenesInfo dearchivedScenes;
@@ -307,7 +394,8 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             TarArchiveReader archive = null;
             byte[] data;
             TarArchiveReader.TarEntryType entryType;
-
+            assetfileInfo[] assetsFiles = new assetfileInfo[32];
+            int assetsFilesCount = 0;
             try
             {
                 FindAndLoadControlFile(out archive, out dearchivedScenes);
@@ -319,7 +407,6 @@ namespace OpenSim.Region.CoreModules.World.Archiver
 
                     if (TarArchiveReader.TarEntryType.TYPE_DIRECTORY == entryType)
                         continue;
-
 
                     // Find the scene that this file belongs to
 
@@ -338,7 +425,6 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                         }
                     }
 
-
                     // Process the file
 
                     if (filePath.StartsWith(ArchiveConstants.OBJECTS_PATH) && !m_noObjects)
@@ -347,13 +433,18 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                     }
                     else if (filePath.StartsWith(ArchiveConstants.ASSETS_PATH) && !m_skipAssets)
                     {
-                        if (LoadAsset(filePath, data))
-                            successfulAssetRestores++;
-                        else
-                            failedAssetRestores++;
+                        assetfileInfo asf = new assetfileInfo
+                        {
+                            path = filePath,
+                            data = data
+                        };
 
-                        if ((successfulAssetRestores + failedAssetRestores) % 250 == 0)
-                            m_log.Debug("[ARCHIVER]: Loaded " + successfulAssetRestores + " assets and failed to load " + failedAssetRestores + " assets...");
+                        assetsFiles[assetsFilesCount++] = asf;
+                        if (assetsFilesCount == 32)
+                        {
+                            loadNeededAssets(assetsFiles, assetsFilesCount, ref successfulAssetRestores, ref failedAssetRestores, ref skippedAssetRestores);
+                            assetsFilesCount = 0;
+                        }
                     }
                     else if (filePath.StartsWith(ArchiveConstants.TERRAINS_PATH) && (!m_merge || m_mergeTerrain))
                     {
@@ -373,6 +464,9 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                     }
                 }
 
+                if (assetsFilesCount > 0)
+                    loadNeededAssets(assetsFiles, assetsFilesCount, ref successfulAssetRestores, ref failedAssetRestores, ref skippedAssetRestores);
+
                 //m_log.Debug("[ARCHIVER]: Reached end of archive");
             }
             catch (Exception e)
@@ -391,11 +485,12 @@ namespace OpenSim.Region.CoreModules.World.Archiver
 
             if (!m_skipAssets)
             {
-                m_log.InfoFormat("[ARCHIVER]: Restored {0} assets", successfulAssetRestores);
+                m_log.InfoFormat("[ARCHIVER]:   Restored {0} assets", successfulAssetRestores + skippedAssetRestores);
+                m_log.InfoFormat("[ARCHIVER]:     Skipped {0} asset uploads", skippedAssetRestores);
 
                 if (failedAssetRestores > 0)
                 {
-                    m_log.ErrorFormat("[ARCHIVER]: Failed to load {0} assets", failedAssetRestores);
+                    m_log.ErrorFormat("[ARCHIVER]:     Failed to load {0} assets", failedAssetRestores);
                     m_errorMessage += String.Format("Failed to load {0} assets", failedAssetRestores);
                 }
             }
@@ -437,9 +532,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             {
                 WorkManager.RunInThread(o =>
                 {
-                    Thread.Sleep(15000);
                     m_log.Info("[ARCHIVER]: Starting scripts in scene objects...");
-
                     foreach (DearchiveContext sceneContext in sceneContexts.Values)
                     {
                         foreach (SceneObjectGroup sceneObject in sceneContext.SceneObjects)
@@ -602,9 +695,16 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                         pos.X -= m_boundingOrigin.X;
                         pos.Y -= m_boundingOrigin.Y;
                     }
-                    if (m_displacement != Vector3.Zero)
+                    if (!m_displacement.IsZero())
                     {
                         pos += m_displacement;
+                        if (pos.X < 0 || pos.X >= scene.RegionInfo.RegionSizeX
+                            || pos.Y < 0 || pos.Y >= scene.RegionInfo.RegionSizeY
+                            || pos.Z < Constants.MinSimulationHeight || pos.Z > Constants.MaxSimulationHeight)
+                        {
+                            if (m_debug) m_log.DebugFormat("[ARCHIVER]: Skipping object from OAR After displacement clip {0}.", pos.ToString());
+                            continue;
+                        }
                         if (m_debug) m_log.DebugFormat("[ARCHIVER]: After displacement, object from OAR is at scene position {0}.", pos.ToString());
                     }
                     sceneObject.AbsolutePosition = pos;
@@ -612,7 +712,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                 if (m_debug)
                     m_log.DebugFormat("[ARCHIVER]: Placing object from OAR in scene at position {0}.  ", pos.ToString());
 
-                bool isTelehub = (sceneObject.UUID == oldTelehubUUID) && (oldTelehubUUID != UUID.Zero);
+                bool isTelehub = (sceneObject.UUID.Equals(oldTelehubUUID)) && (!oldTelehubUUID.IsZero());
 
                 // For now, give all incoming scene objects new uuids.  This will allow scenes to be cloned
                 // on the same region server and multiple examples a single object archive to be imported
@@ -632,8 +732,10 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                 if (scene.AddRestoredSceneObject(sceneObject, true, false))
                 {
                     sceneObjectsLoadedCount++;
-                    sceneObject.CreateScriptInstances(0, false, scene.DefaultScriptEngine, 0);
-                    sceneObject.ResumeScripts();
+                    sceneObjects.Add(sceneObject);
+
+                    //sceneObject.CreateScriptInstances(0, false, scene.DefaultScriptEngine, 0);
+                    //sceneObject.ResumeScripts();
                 }
             }
 
@@ -650,7 +752,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             if (ignoredObjects > 0)
                 m_log.WarnFormat("[ARCHIVER]:     Ignored {0} possible out of bounds", ignoredObjects);
 
-            if (oldTelehubUUID != UUID.Zero)
+            if (!oldTelehubUUID.IsZero())
             {
                 m_log.WarnFormat("[ARCHIVER]: Telehub object not found: {0}", oldTelehubUUID);
                 scene.RegionInfo.RegionSettings.TelehubObject = UUID.Zero;
@@ -674,7 +776,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                         part.CreatorID = m_defaultUser;
                 }
                 if (UserManager != null)
-                    UserManager.AddUser(part.CreatorID, part.CreatorData);
+                    UserManager.AddCreatorUser(part.CreatorID, part.CreatorData);
 
                 if (!(ResolveUserUuid(scene, part.OwnerID) || ResolveGroupUuid(part.OwnerID)))
                     part.OwnerID = m_defaultUser;
@@ -719,7 +821,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                         }
 
                         if (UserManager != null)
-                            UserManager.AddUser(kvp.Value.CreatorID, kvp.Value.CreatorData);
+                            UserManager.AddCreatorUser(kvp.Value.CreatorID, kvp.Value.CreatorData);
 
                         if (!ResolveGroupUuid(kvp.Value.GroupID))
                             kvp.Value.GroupID = UUID.Zero;
@@ -765,8 +867,6 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                 LandData parcel = LandDataSerializer.Deserialize(serialisedParcel);
                 bool overrideRegionSize = true;  //use the src land parcel data size not the dst region size
                 bool isEmptyNow;
-                Vector3 AABBMin;
-                Vector3 AABBMax;
 
                 // create a new LandObject that we can use to manipulate the incoming source parcel data
                 // this is ok, but just beware that some of the LandObject functions (that we haven't used here) still
@@ -786,7 +886,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                 //   parcel.Name, parcel.GlobalID, parcel.LocalID);
                 //landObject.DebugLandBitmap(srcLandBitmap);
 
-                bool[,] dstLandBitmap = landObject.RemapLandBitmap(srcLandBitmap, displacement, m_rotation, boundingOrigin, boundingSize, regionSize, out isEmptyNow, out AABBMin, out AABBMax);
+                bool[,] dstLandBitmap = landObject.RemapLandBitmap(srcLandBitmap, displacement, m_rotation, boundingOrigin, boundingSize, regionSize, out isEmptyNow);
                 if (isEmptyNow)
                 {
                     m_log.WarnFormat("[ARCHIVER]: Not adding destination parcel {0} with GlobalID: {1} LocalID: {2} because, after applying rotation, bounding and displacement, it has no claimed land.",
@@ -799,8 +899,6 @@ namespace OpenSim.Region.CoreModules.World.Archiver
 
                 landObject.LandBitmap = dstLandBitmap;
                 parcel.Bitmap = landObject.ConvertLandBitmapToBytes();
-                parcel.AABBMin = AABBMin;
-                parcel.AABBMax = AABBMax;
 
                 if (domerge)
                 {
@@ -814,7 +912,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                         if (parcels[i] != null)
                         {
                             bool[,] modLandBitmap = parcels[i].ConvertBytesToLandBitmap(overrideRegionSize);
-                            modLandBitmap = parcels[i].RemoveFromLandBitmap(modLandBitmap, dstLandBitmap, out isEmptyNow, out AABBMin, out AABBMax);
+                            modLandBitmap = parcels[i].RemoveFromLandBitmap(modLandBitmap, dstLandBitmap, out isEmptyNow);
                             if (isEmptyNow)
                             {
                                 parcels[i] = null;
@@ -823,8 +921,6 @@ namespace OpenSim.Region.CoreModules.World.Archiver
                             {
                                 parcels[i].LandBitmap = modLandBitmap;
                                 parcels[i].LandData.Bitmap = parcels[i].ConvertLandBitmapToBytes();
-                                parcels[i].LandData.AABBMin = AABBMin;
-                                parcels[i].LandData.AABBMax = AABBMax;
                             }
                         }
                     }
@@ -837,15 +933,15 @@ namespace OpenSim.Region.CoreModules.World.Archiver
 
                 if (parcel.IsGroupOwned)
                 {
-                    if (parcel.GroupID != UUID.Zero)
-                    {
-                        // In group-owned parcels, OwnerID=GroupID. This should already be the case, but let's make sure.
-                        parcel.OwnerID = parcel.GroupID;
-                    }
-                    else
+                    if (parcel.GroupID.IsZero())
                     {
                         parcel.OwnerID = m_rootScene.RegionInfo.EstateSettings.EstateOwner;
                         parcel.IsGroupOwned = false;
+                    }
+                    else
+                    {
+                        // In group-owned parcels, OwnerID=GroupID. This should already be the case, but let's make sure.
+                        parcel.OwnerID = parcel.GroupID;
                     }
                 }
                 else
@@ -942,88 +1038,31 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             }
         }
 
-        /// Load an asset
-        /// </summary>
-        /// <param name="assetFilename"></param>
-        /// <param name="data"></param>
-        /// <returns>true if asset was successfully loaded, false otherwise</returns>
-        private bool LoadAsset(string assetPath, byte[] data)
+        private bool TryUploadAsset(UUID assetID, sbyte assetType, byte[] data)
         {
-            // Right now we're nastily obtaining the UUID from the filename
-            string filename = assetPath.Remove(0, ArchiveConstants.ASSETS_PATH.Length);
-            int i = filename.LastIndexOf(ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
-
-            if (i == -1)
+            if (assetType == (sbyte)AssetType.Unknown)
             {
-                m_log.ErrorFormat(
-                    "[ARCHIVER]: Could not find extension information in asset path {0} since it's missing the separator {1}.  Skipping",
-                    assetPath, ArchiveConstants.ASSET_EXTENSION_SEPARATOR);
+                m_log.WarnFormat("[ARCHIVER]: Importing {0} byte asset {1} with unknown type", data.Length, assetID.ToString());
+            }
+            else if (assetType == (sbyte)AssetType.Object)
+            {
+                data = SceneObjectSerializer.ModifySerializedObject(assetID, data,
+                    sog =>
+                    {
+                        ModifySceneObject(m_rootScene, sog);
+                        return true;
+                    });
 
-                return false;
+                if (data == null)
+                    return false;
             }
 
-            string extension = filename.Substring(i);
-            string uuid = filename.Remove(filename.Length - extension.Length);
+            //m_log.DebugFormat("[ARCHIVER]: Importing asset {0}, type {1}", uuid, assetType);
+            AssetBase asset = new AssetBase(assetID, string.Empty, assetType, UUID.Zero.ToString());
+            asset.Data = data;
 
-            if (m_assetService.GetMetadata(uuid) != null)
-            {
-                sbyte asype = ArchiveConstants.EXTENSION_TO_ASSET_TYPE[extension];
-
-                // m_log.DebugFormat("[ARCHIVER]: found existing asset {0}",uuid);
-                return true;
-            }
-
-            if (ArchiveConstants.EXTENSION_TO_ASSET_TYPE.ContainsKey(extension))
-            {
-                sbyte assetType = ArchiveConstants.EXTENSION_TO_ASSET_TYPE[extension];
-
-                if (assetType == (sbyte)AssetType.Unknown)
-                {
-                    m_log.WarnFormat("[ARCHIVER]: Importing {0} byte asset {1} with unknown type", data.Length, uuid);
-                }
-                else if (assetType == (sbyte)AssetType.Object)
-                {
-                    data = SceneObjectSerializer.ModifySerializedObject(UUID.Parse(uuid), data,
-                        sog =>
-                        {
-                            ModifySceneObject(m_rootScene, sog);
-                            return true;
-                        });
-
-                    if (data == null)
-                        return false;
-                }
-
-                //m_log.DebugFormat("[ARCHIVER]: Importing asset {0}, type {1}", uuid, assetType);
-
-                AssetBase asset = new AssetBase(new UUID(uuid), String.Empty, assetType, UUID.Zero.ToString());
-                asset.Data = data;
-
-                // We're relying on the asset service to do the sensible thing and not store the asset if it already
-                // exists.
-                m_assetService.Store(asset);
-
-                /**
-                 * Create layers on decode for image assets.  This is likely to significantly increase the time to load archives so
-                 * it might be best done when dearchive takes place on a separate thread
-                if (asset.Type=AssetType.Texture)
-                {
-                    IJ2KDecoder cacheLayerDecode = scene.RequestModuleInterface<IJ2KDecoder>();
-                    if (cacheLayerDecode != null)
-                        cacheLayerDecode.syncdecode(asset.FullID, asset.Data);
-                }
-                */
-
-                return true;
-            }
-            else
-            {
-                m_log.ErrorFormat(
-                    "[ARCHIVER]: Tried to dearchive data with path {0} with an unknown type extension {1}",
-                    assetPath, extension);
-
-                return false;
-            }
+            m_assetService.Store(asset);
+            return true; // not right
         }
 
         /// <summary>
@@ -1042,7 +1081,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             ViewerEnvironment regionEnv = null;
             try
             {
-                loadedRegionSettings = RegionSettingsSerializer.Deserialize(data, out regionEnv);
+                loadedRegionSettings = RegionSettingsSerializer.Deserialize(data, out regionEnv, scene.RegionInfo.EstateSettings);
             }
             catch (Exception e)
             {
@@ -1102,6 +1141,8 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             currentRegionSettings.CacheID = UUID.Random();
             currentRegionSettings.Save();
 
+            scene.EstateDataServiceSafe?.StoreEstateSettings(scene.RegionInfo.EstateSettings);
+
             IEstateModule estateModule = scene.RequestModuleInterface<IEstateModule>();
             if (estateModule != null)
                 estateModule.sendRegionHandshakeToAll();
@@ -1123,7 +1164,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             ITerrainModule terrainModule = scene.RequestModuleInterface<ITerrainModule>();
             using (MemoryStream ms = new MemoryStream(data))
             {
-                if (m_displacement != Vector3.Zero || m_rotation != 0f || m_boundingBox)
+               if (!m_displacement.IsZero() || m_rotation != 0f || m_boundingBox)
                 {
                     Vector2 boundingOrigin = new Vector2(m_boundingOrigin.X, m_boundingOrigin.Y);
                     Vector2 boundingSize = new Vector2(m_boundingSize.X, m_boundingSize.Y);
@@ -1151,6 +1192,7 @@ namespace OpenSim.Region.CoreModules.World.Archiver
             XmlNamespaceManager nsmgr = new XmlNamespaceManager(new NameTable());
             XmlParserContext context = new XmlParserContext(null, nsmgr, null, XmlSpace.None);
             XmlTextReader xtr = new XmlTextReader(Encoding.ASCII.GetString(data), XmlNodeType.Document, context);
+            xtr.DtdProcessing = DtdProcessing.Ignore;
 
             // Loaded metadata will be empty if no information exists in the archive
             dearchivedScenes.LoadedCreationDateTime = 0;

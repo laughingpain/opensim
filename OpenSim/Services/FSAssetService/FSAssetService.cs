@@ -130,18 +130,18 @@ namespace OpenSim.Services.FSAssetService
 
             if (dbConfig != null)
             {
-                if (dllName == String.Empty)
+                if (dllName.Length == 0)
                     dllName = dbConfig.GetString("StorageProvider", String.Empty);
 
-                if (connectionString == String.Empty)
+                if (connectionString.Length == 0)
                     connectionString = dbConfig.GetString("ConnectionString", String.Empty);
             }
 
             // No databse connection found in either config
-            if (dllName.Equals(String.Empty))
+            if (string.IsNullOrEmpty(dllName))
                 throw new Exception("No StorageProvider configured");
 
-            if (connectionString.Equals(String.Empty))
+            if (string.IsNullOrEmpty(connectionString))
                 throw new Exception("Missing database connection string");
 
             // Create Storage Provider
@@ -178,7 +178,7 @@ namespace OpenSim.Services.FSAssetService
             Directory.CreateDirectory(spoolTmp);
 
             m_FSBase = assetConfig.GetString("BaseDirectory", String.Empty);
-            if (m_FSBase == String.Empty)
+            if (m_FSBase.Length == 0)
             {
                 m_log.ErrorFormat("[FSASSETS]: BaseDirectory not specified");
                 throw new Exception("Configuration error");
@@ -420,6 +420,11 @@ namespace OpenSim.Services.FSAssetService
             return Get(id, out hash);
         }
 
+        public AssetBase Get(string id, string ForeignAssetService, bool dummy)
+        {
+            return null;
+        }
+
         private AssetBase Get(string id, out string sha)
         {
             string hash = string.Empty;
@@ -591,7 +596,7 @@ namespace OpenSim.Services.FSAssetService
                 }
                 catch (Exception)
                 {
-                    return new Byte[0];
+                    return Array.Empty<byte>();
                 }
             }
             else if (File.Exists(diskFile))
@@ -606,7 +611,7 @@ namespace OpenSim.Services.FSAssetService
                 {
                 }
             }
-            return new Byte[0];
+            return Array.Empty<byte>();
 
         }
 
@@ -663,15 +668,15 @@ namespace OpenSim.Services.FSAssetService
                 }
             }
 
-            if (asset.ID == string.Empty)
+            if (asset.ID.Length == 0)
             {
-                if (asset.FullID == UUID.Zero)
+                if (asset.FullID.IsZero())
                 {
                     asset.FullID = UUID.Random();
                 }
                 asset.ID = asset.FullID.ToString();
             }
-            else if (asset.FullID == UUID.Zero)
+            else if (asset.FullID.IsZero())
             {
                 UUID uuid = UUID.Zero;
                 if (UUID.TryParse(asset.ID, out uuid))
@@ -828,6 +833,11 @@ namespace OpenSim.Services.FSAssetService
         public AssetBase GetCached(string id)
         {
             return Get(id);
+        }
+
+        public void Get(string id, string ForeignAssetService, bool StoreOnLocalGrid, SimpleAssetRetrieved callBack)
+        {
+            return;
         }
     }
 }

@@ -259,7 +259,7 @@ namespace OpenSim.Framework
 
         public static void AddElem(Quaternion e, StringBuilder sb)
         {
-            sb.Append("<array><key>x</key>");
+            sb.Append("<array>");
 
             if(e.X == 0)
                 sb.Append("<real>0</real>");
@@ -311,7 +311,7 @@ namespace OpenSim.Framework
 
         public static void AddElem(UUID e, StringBuilder sb)
         {
-            if(e == UUID.Zero)
+            if(e.IsZero())
                 sb.Append("<uuid />");
             else
             {
@@ -660,7 +660,7 @@ namespace OpenSim.Framework
             sb.Append(name);
             sb.Append("</key>");
 
-            if(e == UUID.Zero)
+            if(e.IsZero())
                 sb.Append("<uuid />");
             else
             {

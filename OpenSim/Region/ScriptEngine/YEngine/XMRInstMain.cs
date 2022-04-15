@@ -30,28 +30,12 @@ using System.Threading;
 using System.Reflection;
 using System.Collections;
 using System.Collections.Generic;
-using System.Runtime.Remoting.Lifetime;
-using System.Security.Policy;
-using System.IO;
-using System.Xml;
-using System.Text;
 using OpenMetaverse;
 using OpenSim.Framework;
 using OpenSim.Region.ScriptEngine.Interfaces;
 using OpenSim.Region.ScriptEngine.Shared;
-using OpenSim.Region.ScriptEngine.Shared.Api;
-using OpenSim.Region.ScriptEngine.Shared.ScriptBase;
-using OpenSim.Region.ScriptEngine.Yengine;
 using OpenSim.Region.Framework.Scenes;
 using log4net;
-
-using LSL_Float = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLFloat;
-using LSL_Integer = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLInteger;
-using LSL_Key = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLString;
-using LSL_List = OpenSim.Region.ScriptEngine.Shared.LSL_Types.list;
-using LSL_Rotation = OpenSim.Region.ScriptEngine.Shared.LSL_Types.Quaternion;
-using LSL_String = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLString;
-using LSL_Vector = OpenSim.Region.ScriptEngine.Shared.LSL_Types.Vector3;
 
 // This class exists in the main app domain
 //
@@ -132,13 +116,13 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         public int m_StartParam = 0;
         public StateSource m_StateSource;
         public string m_DescName;
-        private bool[] m_HaveEventHandlers;
+        private bool[] m_HaveEventHandlers = new bool[(int)ScriptEventCode.Size];
         public int m_StackSize;
         public int m_HeapSize;
         private ArrayList m_CompilerErrors;
         private DateTime m_LastRanAt = DateTime.MinValue;
-        private string m_RunOnePhase = "hasn't run";
-        private string m_CheckRunPhase = "hasn't checked";
+        //private string m_RunOnePhase = "hasn't run";
+        //private string m_CheckRunPhase = "hasn't checked";
         public int m_InstEHEvent = 0;  // number of events dequeued (StartEventHandler called)
         public int m_InstEHSlice = 0;  // number of times handler timesliced (ResumeEx called)
         public double m_CPUTime = 0;  // accumulated CPU time (milliseconds)
@@ -219,5 +203,45 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         // llmineventdelay support
         double m_minEventDelay = 0.0;
         double m_nextEventTime = 0.0;
+
+        private static readonly Dictionary<string, ScriptEventCode> m_eventCodeMap = new Dictionary<string, ScriptEventCode>()
+        {
+            {"attach", ScriptEventCode.attach},
+            {"at_rot_target", ScriptEventCode.at_rot_target},
+            {"at_target", ScriptEventCode.at_target},
+            {"collision", ScriptEventCode.collision},
+            {"collision_end", ScriptEventCode.collision_end},
+            {"collision_start", ScriptEventCode.collision_start},
+            {"control", ScriptEventCode.control},
+            {"dataserver", ScriptEventCode.dataserver},
+            {"email", ScriptEventCode.email},
+            {"http_response", ScriptEventCode.http_response},
+            {"land_collision", ScriptEventCode.land_collision},
+            {"land_collision_end", ScriptEventCode.land_collision_end},
+            {"land_collision_start", ScriptEventCode.land_collision_start},
+            {"listen", ScriptEventCode.listen},
+            {"money", ScriptEventCode.money},
+            {"moving_end", ScriptEventCode.moving_end},
+            {"moving_start", ScriptEventCode.moving_start},
+            {"not_at_rot_target", ScriptEventCode.not_at_rot_target},
+            {"not_at_target", ScriptEventCode.not_at_target},
+            {"remote_data", ScriptEventCode.remote_data},
+            {"run_time_permissions", ScriptEventCode.run_time_permissions},
+            {"state_entry", ScriptEventCode.state_entry},
+            {"state_exit", ScriptEventCode.state_exit},
+            {"timer", ScriptEventCode.timer},
+            {"touch", ScriptEventCode.touch},
+            {"touch_end", ScriptEventCode.touch_end},
+            {"touch_start", ScriptEventCode.touch_start},
+            {"transaction_result", ScriptEventCode.transaction_result},
+            {"object_rez", ScriptEventCode.object_rez},
+            {"changed", ScriptEventCode.changed},
+            {"link_message", ScriptEventCode.link_message},
+            {"no_sensor", ScriptEventCode.no_sensor},
+            {"on_rez", ScriptEventCode.on_rez},
+            {"sensor", ScriptEventCode.sensor},
+            {"http_request", ScriptEventCode.http_request},
+            {"path_update", ScriptEventCode.path_update}
+        };
     }
 }

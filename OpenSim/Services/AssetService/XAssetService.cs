@@ -86,7 +86,6 @@ namespace OpenSim.Services.AssetService
                     }
 
                     m_log.Debug("[XASSET SERVICE]: Local asset service enabled");
-                    m_log.Error("[XASSET SERVICE]: THIS ASSET SERVICE HAS BEEN MARKED OBSOLETE. PLEASE USE FSAssetService");
                 }
             }
         }
@@ -130,6 +129,11 @@ namespace OpenSim.Services.AssetService
             }
         }
 
+        public AssetBase Get(string id, string ForeignAssetService, bool dummy)
+        {
+            return null;
+        }
+
         public virtual AssetBase GetCached(string id)
         {
             return Get(id);
@@ -163,9 +167,7 @@ namespace OpenSim.Services.AssetService
         {
             //m_log.DebugFormat("[XASSET SERVICE]: Get asset async {0}", id);
 
-            UUID assetID;
-
-            if (!UUID.TryParse(id, out assetID))
+            if (!UUID.TryParse(id, out UUID assetID) || assetID.IsZero())
                 return false;
 
             AssetBase asset = Get(id);
@@ -225,5 +227,10 @@ namespace OpenSim.Services.AssetService
             Store(asset);
             m_ChainedAssetService.Delete(asset.ID);
         }
+
+        public void Get(string id, string ForeignAssetService, bool StoreOnLocalGrid, SimpleAssetRetrieved callBack)
+        {
+        }
+
     }
 }

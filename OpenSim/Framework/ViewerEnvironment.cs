@@ -98,6 +98,8 @@ namespace OpenSim.Framework
                 Cycle = new DayCycle();
                 Cycle.FromWLOSD(array);
             }
+
+            InvalidateCaches();
         }
 
         public OSD ToWLOSD(UUID message, UUID region)
@@ -244,6 +246,8 @@ namespace OpenSim.Framework
             Cycle.skyframes.Add(sky.Name, sky);
             track = new DayCycle.TrackEntry(-1, sky.Name);
             Cycle.skyTrack0.Add(track);
+
+            InvalidateCaches();
         }
 
         public RegionLightShareData ToLightShare()
@@ -346,6 +350,7 @@ namespace OpenSim.Framework
             }
 
             IsLegacy = false;
+            InvalidateCaches();
         }
 
         public void SortAltitudes()
@@ -373,14 +378,55 @@ namespace OpenSim.Framework
             OSDMap map = osd as OSDMap;
             if (map == null)
                 return false;
-            if(!map.TryGetValue("type", out OSD tmp))
+            if (!map.TryGetValue("type", out OSD tmp))
                 return false;
             string type = tmp.AsString();
-            if(type != "daycycle")
+            if (type != "daycycle")
                 return false;
             Cycle = new DayCycle();
             Cycle.FromOSD(map);
+
+            InvalidateCaches();
+
             return true;
+        }
+
+        public bool FromAssetOSD(string name, OSD osd)
+        {
+            OSDMap map = osd as OSDMap;
+            if (map == null)
+                return false;
+            if (!map.TryGetValue("type", out OSD tmp))
+                return false;
+            string type = tmp.AsString();
+
+            bool ok = false;
+            if (type == "water")
+            {
+                if (Cycle == null)
+                    Cycle = new DayCycle();
+                ok = Cycle.replaceWaterFromOSD(name, map);
+            }
+            else
+            {
+                if (type == "daycycle")
+                {
+                    Cycle = new DayCycle();
+                    Cycle.FromOSD(map);
+                    ok = true;
+                }
+                else if(type == "sky")
+                {
+                    if (Cycle == null)
+                        Cycle = new DayCycle();
+                    ok = Cycle.replaceSkyFromOSD(name, map);
+                }
+            }
+            if(ok && !string.IsNullOrWhiteSpace(name))
+                Cycle.Name = name;
+
+            InvalidateCaches();
+            return ok;
         }
 
         public OSD ToOSD()
@@ -398,6 +444,64 @@ namespace OpenSim.Framework
             alt.Add(Altitudes[2]);
             env["track_altitudes"] = alt;
             return env;
+        }
+
+        public readonly object m_cachedbytesLock = new object();
+        public byte[] m_cachedbytes = null;
+        public byte[] m_cachedWLbytes = null;
+
+        public void InvalidateCaches()
+        {
+            lock (m_cachedbytesLock)
+            {
+                m_cachedbytes = null;
+                m_cachedWLbytes = null;
+            }
+        }
+
+        public byte[] ToCapBytes(UUID regionID, int parcelID)
+        {
+            //byte[] ret = m_cachedbytes;
+            //if(ret != null)
+            //    return ret;
+
+            lock (m_cachedbytesLock)
+            {
+                byte[] ret = m_cachedbytes;
+                if (ret == null)
+                {
+                    OSDMap map = new OSDMap();
+                    OSDMap cenv = (OSDMap)ToOSD();
+                    cenv["parcel_id"] = parcelID;
+                    cenv["region_id"] = regionID;
+                    map["environment"] = cenv;
+                    map["parcel_id"] = parcelID;
+                    map["success"] = true;
+                    ret = OSDParser.SerializeLLSDXmlToBytes(map);
+                    m_cachedbytes = ret;
+                }
+
+                return ret;
+            }
+        }
+
+        public byte[] ToCapWLBytes(UUID messageID, UUID regionID)
+        {
+            //byte[] ret = m_cachedWLbytes;
+            //if (ret != null)
+            //    return ret;
+
+            lock (m_cachedbytesLock)
+            {
+                byte[] ret = m_cachedWLbytes;
+                if (ret == null)
+                {
+                    OSD d = ToWLOSD(messageID, regionID);
+                    ret = OSDParser.SerializeLLSDXmlToBytes(d);
+                    m_cachedWLbytes = ret;
+                }
+                return ret;
+            }
         }
 
         public static ViewerEnvironment FromOSDString(string s)

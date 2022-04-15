@@ -87,14 +87,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         private string m_ScriptBasePath;
         private bool m_Enabled = false;
         public bool m_StartProcessing = false;
-        private Dictionary<UUID, ArrayList> m_ScriptErrors =
-                new Dictionary<UUID, ArrayList>();
-        private Dictionary<UUID, List<UUID>> m_ObjectItemList =
-                new Dictionary<UUID, List<UUID>>();
-        private Dictionary<UUID, XMRInstance[]> m_ObjectInstArray =
-                new Dictionary<UUID, XMRInstance[]>();
-        public Dictionary<string, FieldInfo> m_XMRInstanceApiCtxFieldInfos =
-                new Dictionary<string, FieldInfo>();
+        private Dictionary<UUID, ArrayList> m_ScriptErrors = new Dictionary<UUID, ArrayList>();
+        private Dictionary<UUID, List<UUID>> m_ObjectItemList =  new Dictionary<UUID, List<UUID>>();
+        private Dictionary<UUID, XMRInstance[]> m_ObjectInstArray = new Dictionary<UUID, XMRInstance[]>();
+        public Dictionary<string, FieldInfo> m_XMRInstanceApiCtxFieldInfos = new Dictionary<string, FieldInfo>();
         public int m_StackSize;
         private int m_HeapSize;
         private Thread m_SleepThread = null;
@@ -220,21 +216,21 @@ namespace OpenSim.Region.ScriptEngine.Yengine
 
             // Verify that our ScriptEventCode's match OpenSim's scriptEvent's.
             bool err = false;
-            for(int i = 0; i < 32; i++)
+            for(int i = 0; i < (int)ScriptEventCode.Size; i++)
             {
                 string mycode = "undefined";
                 string oscode = "undefined";
                 try
                 {
                     mycode = ((ScriptEventCode)i).ToString();
-                    Convert.ToInt32(mycode);
+                    Convert.ToInt64(mycode);
                     mycode = "undefined";
                 }
                 catch { }
                 try
                 {
-                    oscode = ((OpenSim.Region.Framework.Scenes.scriptEvents)(1 << i)).ToString();
-                    Convert.ToInt32(oscode);
+                    oscode = ((OpenSim.Region.Framework.Scenes.scriptEvents)(1ul << i)).ToString();
+                    Convert.ToInt64(oscode);
                     oscode = "undefined";
                 }
                 catch { }
@@ -283,10 +279,9 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             }
 
             MainConsole.Instance.Commands.AddCommand("yeng", false,
-                    "yeng",
-                    "yeng [...|help|...] ...",
+                    "yeng", "yeng [...|help|...] ...",
                     "Run YEngine script engine commands",
-                    RunTest);
+                    HandleConsoleCmds);
 
             TraceCalls("[YEngine]: Initialize successful");
         }
@@ -302,7 +297,13 @@ namespace OpenSim.Region.ScriptEngine.Yengine
 
             m_Scene.RegisterModuleInterface<IScriptModule>(this);
 
-            m_ScriptBasePath = m_Config.GetString("ScriptBasePath", "ScriptEngines");
+            m_ScriptBasePath = m_Config.GetString("ScriptEnginesPath");
+            //look for old
+            if (string.IsNullOrWhiteSpace(m_ScriptBasePath))
+                m_ScriptBasePath = m_Config.GetString("ScriptBasePath");
+            if (string.IsNullOrWhiteSpace(m_ScriptBasePath))
+                m_ScriptBasePath = "ScriptEngines";
+
             m_ScriptBasePath = Path.Combine(m_ScriptBasePath, "Yengine");
             m_ScriptBasePath = Path.Combine(m_ScriptBasePath, scene.RegionInfo.RegionID.ToString());
 
@@ -320,7 +321,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     (((m_HeapSize % 0x100000) * 1000)
                             >> 20).ToString("D3"));
 
-            m_SleepThread = StartMyThread(RunSleepThread, "Yengine sleep" + " (" + sceneName + ")", ThreadPriority.Normal);
+            m_SleepThread = StartMyThread(RunSleepThread, "Yengine sleep" + " (" + sceneName + ")", ThreadPriority.Normal, -1);
             for (int i = 0; i < numThreadScriptWorkers; i++)
                 StartThreadWorker(i, m_workersPrio, sceneName);
 
@@ -359,7 +360,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 //  }
                 AssemblyName assemblyName = new AssemblyName();
                 assemblyName.Name = "XMRInstanceSuperAssembly";
-                AssemblyBuilder assemblyBuilder = Thread.GetDomain().DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
+                AssemblyBuilder assemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
                 ModuleBuilder moduleBuilder = assemblyBuilder.DefineDynamicModule("XMRInstanceSuperModule");
                 TypeBuilder typeBuilder = moduleBuilder.DefineType("XMRInstanceSuperType", TypeAttributes.Public | TypeAttributes.Class);
                 typeBuilder.SetParent(typeof(XMRInstance));
@@ -763,7 +764,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             TraceCalls("[YEngine]: YEngine.Close()");
         }
 
-        private void RunTest(string module, string[] args)
+        private void HandleConsoleCmds(string module, string[] args)
         {
             if(args.Length < 2)
             {
@@ -771,9 +772,29 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 return;
             }
 
-            m_log.Info("[YEngine]: " + m_Scene.RegionInfo.RegionName);
+            Scene consoleScene = SceneManager.Instance.CurrentOrFirstScene;
+            bool SelectedRegion = (consoleScene != null && consoleScene.RegionInfo.RegionID == m_Scene.RegionInfo.RegionID);
+            string cmd = args[1].ToLower();
+            int firstPerRegionarg = args.Length >= 3 && args[2].Equals("allregions",StringComparison.InvariantCultureIgnoreCase) ? 3 : 2;
+            if (!SelectedRegion)
+            {
+                if(firstPerRegionarg < 3)
+                    return;
 
-            switch(args[1])
+                switch (cmd)
+                {
+                    case "reset":
+                    case "resume":
+                    case "suspend":
+                        break;
+                    default:
+                        return;
+                }
+            }
+
+            m_log.InfoFormat("[YEngine] ****Region: {0}", m_Scene.RegionInfo.RegionName);
+
+            switch(cmd)
             {
                 case "cvv":
                     m_log.InfoFormat("[YEngine]: compiled version value = {0}",
@@ -782,32 +803,32 @@ namespace OpenSim.Region.ScriptEngine.Yengine
 
                 case "help":
                 case "?":
-                    m_log.Info("[YEngine]: yeng reset [-help ...]");
-                    m_log.Info("[YEngine]: yeng resume - resume script processing");
-                    m_log.Info("[YEngine]: yeng suspend - suspend script processing");
+                    m_log.Info("[YEngine]: yeng reset [allregions] | [-help ...]");
+                    m_log.Info("[YEngine]: yeng resume [allregions] - resume script processing");
+                    m_log.Info("[YEngine]: yeng suspend [allregions] - suspend script processing");
                     m_log.Info("[YEngine]: yeng ls [-help ...]");
                     m_log.Info("[YEngine]: yeng cvv - show compiler version value");
-                    m_log.Info("[YEngine]: yeng mvv [<newvalue>] - show migration version value");
+                    //m_log.Info("[YEngine]: yeng mvv [<newvalue>] - show migration version value");
+                    m_log.Info("[YEngine]: yeng mvv - show migration version value");
                     m_log.Info("[YEngine]: yeng tracecalls [yes | no]");
                     m_log.Info("[YEngine]: yeng verbose [yes | no]");
-                    m_log.Info("[YEngine]: yeng pev [-help ...] - post event");
+                    //m_log.Info("[YEngine]: yeng pev [-help ...] - post event");
                     break;
 
                 case "ls":
-                    XmrTestLs(args, 2);
+                    XmrTestLs(args, firstPerRegionarg);
                     break;
 
                 case "mvv":
-                    m_log.InfoFormat("[YEngine]: migration version value = {0}",
-                        XMRInstance.migrationVersion);
+                    m_log.InfoFormat("[YEngine]: migration version value = {0}", XMRInstance.migrationVersion);
                     break;
 
-                case "pev":
-                    XmrTestPev(args, 2);
-                    break;
+                //case "pev":
+                //    XmrTestPev(args, 2);
+                //    break;
 
                 case "reset":
-                    XmrTestReset(args, 2);
+                    XmrTestReset(args, firstPerRegionarg);
                     break;
 
                 case "resume":
@@ -821,19 +842,19 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     break;
 
                 case "tracecalls":
-                    if(args.Length > 2)
-                        m_TraceCalls = (args[2][0] & 1) != 0;
+                    if(args.Length > firstPerRegionarg)
+                        m_TraceCalls = args[firstPerRegionarg].StartsWith("y", StringComparison.InvariantCultureIgnoreCase);
                     m_log.Info("[YEngine]: tracecalls " + (m_TraceCalls ? "yes" : "no"));
                     break;
 
                 case "verbose":
-                    if(args.Length > 2)
-                        m_Verbose = (args[2][0] & 1) != 0;
+                    if(args.Length > firstPerRegionarg)
+                        m_Verbose = args[firstPerRegionarg].StartsWith("y", StringComparison.InvariantCultureIgnoreCase);
                     m_log.Info("[YEngine]: verbose " + (m_Verbose ? "yes" : "no"));
                     break;
 
                 default:
-                    m_log.Error("[YEngine]: unknown command " + args[1] + ", try 'yeng help'");
+                    m_log.ErrorFormat("[YEngine]: unknown command \"{0}\", try 'yeng help'", cmd);
                     break;
             }
         }
@@ -941,7 +962,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 if(!m_ObjectInstArray.TryGetValue(partUUID, out objInstArray))
                     return false;
 
-                if(objInstArray == null)
+                if (objInstArray == null)
                 {
                     objInstArray = RebuildObjectInstArray(partUUID);
                     m_ObjectInstArray[partUUID] = objInstArray;
@@ -951,7 +972,8 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             // Post event to all script instances in the object.
             if(objInstArray.Length <= 0)
                 return false;
-            foreach(XMRInstance inst in objInstArray)
+
+            foreach (XMRInstance inst in objInstArray)
                 inst.PostEvent(parms);
 
             return true;
@@ -990,10 +1012,13 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         {
             XMRInstance instance = GetInstance(itemID);
             if(instance != null)
+            {
                 instance.Running = state;
+                if(instance.m_Item != null)
+                    instance.m_Item.ScriptRunning = instance.Running;
+            }
         }
 
-        // Control display of the "running" checkbox
         //
         public bool GetScriptState(UUID itemID)
         {
@@ -1142,8 +1167,9 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     return false;
                 isX = true;
             }
-                // <ScriptState>...</ScriptState> contains contents of .state file.
-                XmlElement scriptStateN = (XmlElement)stateN.SelectSingleNode("ScriptState");
+
+            // <ScriptState>...</ScriptState> contains contents of .state file.
+            XmlElement scriptStateN = (XmlElement)stateN.SelectSingleNode("ScriptState");
             if(scriptStateN == null)
                 return false;
 
@@ -1217,9 +1243,6 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             if (script.StartsWith("//MRM:"))
                 return;
 
-            SceneObjectPart part = m_Scene.GetSceneObjectPart(localID);
-            TaskInventoryItem item = part.Inventory.GetInventoryItem(itemID);
-
             if(!m_LateInit)
             {
                 m_LateInit = true;
@@ -1284,6 +1307,9 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             if(!string.IsNullOrEmpty(langsrt) && langsrt !="lsl")
                 return;
 
+            SceneObjectPart part = m_Scene.GetSceneObjectPart(localID);
+            TaskInventoryItem item = part.Inventory.GetInventoryItem(itemID);
+
             // Put on object/instance lists.
             XMRInstance instance = (XMRInstance)Activator.CreateInstance(ScriptCodeGen.xmrInstSuperType);
             instance.m_LocalID = localID;
@@ -1297,8 +1323,9 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             instance.m_Item = item;
             instance.m_DescName = part.Name + ":" + item.Name;
             instance.m_IState = XMRInstState.CONSTRUCT;
+            instance.m_Running = item.ScriptRunning;
 
-            lock(m_InstancesDict)
+            lock (m_InstancesDict)
             {
                 m_LockedDict = "RegisterInstance";
 
@@ -1406,15 +1433,28 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             // Put it on the start queue so it will run any queued event handlers,
             // such as state_entry() or on_rez().  If there aren't any queued, it
             // will just go to idle state when RunOne() tries to dequeue an event.
-            lock(instance.m_QueueLock)
+            // Declare which events the script's current state can handle.
+
+            ulong eventMask = instance.GetStateEventFlags(instance.stateCode);
+            instance.m_Part.SetScriptEvents(instance.m_ItemID, eventMask);
+
+            lock (instance.m_QueueLock)
             {
                 if(instance.m_IState != XMRInstState.CONSTRUCT)
                     throw new Exception("bad state");
-                instance.m_IState = XMRInstState.ONSTARTQ;
-                if(!instance.m_Running)
-                    instance.EmptyEventQueues();
+
+                if (instance.m_Running)
+                {
+                    instance.m_Item.ScriptRunning = true;
+                    instance.m_IState = XMRInstState.ONSTARTQ;
+                    QueueToStart(instance);
+                }
+                else
+                {
+                    instance.m_Item.ScriptRunning = false;
+                    instance.m_IState = XMRInstState.SUSPENDED;
+                }
             }
-            QueueToStart(instance);
         }
 
         public void OnRemoveScript(uint localID, UUID itemID)
@@ -1461,9 +1501,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 string stateFileName = XMRInstance.GetStateFileName(m_ScriptBasePath, itemID);
                 File.Delete(stateFileName);
 
-                ScriptRemoved handlerScriptRemoved = OnScriptRemoved;
-                if(handlerScriptRemoved != null)
-                    handlerScriptRemoved(itemID);
+                OnScriptRemoved?.Invoke(itemID);
 
                 m_LockedDict = "~~OnRemoveScript";
             }
@@ -1483,14 +1521,22 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         {
             XMRInstance instance = GetInstance(itemID);
             if(instance != null)
+            {
                 instance.Running = true;
+                if (instance.m_Item != null)
+                    instance.m_Item.ScriptRunning = true;
+            }
         }
 
         public void OnStopScript(uint localID, UUID itemID)
         {
             XMRInstance instance = GetInstance(itemID);
             if(instance != null)
+            {
                 instance.Running = false;
+                if (instance.m_Item != null)
+                    instance.m_Item.ScriptRunning = false;
+            }
         }
 
         public void OnGetScriptRunning(IClientAPI controllingClient,
@@ -1501,15 +1547,16 @@ namespace OpenSim.Region.ScriptEngine.Yengine
             {
                 TraceCalls("[YEngine]: YEngine.OnGetScriptRunning({0},{1})", objectID.ToString(), itemID.ToString());
 
+                bool curRunnning = instance.Running;
+                instance.m_Item.ScriptRunning = curRunnning;
                 IEventQueue eq = World.RequestModuleInterface<IEventQueue>();
                 if(eq == null)
                 {
-                    controllingClient.SendScriptRunningReply(objectID, itemID,
-                            instance.Running);
+                    controllingClient.SendScriptRunningReply(objectID, itemID, curRunnning);
                 }
                 else
                 {
-                    eq.ScriptRunningEvent(objectID, itemID, instance.Running, controllingClient.AgentId);
+                    eq.ScriptRunningEvent(objectID, itemID, curRunnning, controllingClient.AgentId);
                 }
             }
         }
@@ -1698,6 +1745,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                         inst.m_IState = XMRInstState.IDLE;
                         Monitor.Exit(inst.m_QueueLock);
                     }
+                    m_Scene.AddScriptEvents(1);
                     break;
 
                 // Its m_SuspendCount > 0.
@@ -1875,11 +1923,51 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         }
 
         /**
-         * @brief A float the value is a representative execution time in
-         *        milliseconds of all scripts in the link set.
-         * @param itemIDs = list of scripts in the link set
-         * @returns milliseconds for all those scripts
+         * @brief Return a list of object script used bytes and time
          */
+
+        public ICollection<ScriptTopStatsData> GetTopObjectStats(float mintime, int minmemory, out float totaltime, out float totalmemory)
+        {
+            Dictionary<uint, ScriptTopStatsData> topScripts = new Dictionary<uint, ScriptTopStatsData>();
+            totalmemory = 0;
+            totaltime = 0;
+            lock (m_InstancesDict)
+            {
+                foreach (XMRInstance instance in m_InstancesDict.Values)
+                {
+                    uint rootLocalID = instance.m_Part.ParentGroup.LocalId;
+                    float time = (float)instance.m_CPUTime;
+                    totaltime += time;
+                    int mem = instance.xmrHeapUsed();
+                    totalmemory += mem;
+                    if (time > mintime || mem > minmemory)
+                    {
+                        ScriptTopStatsData sd;
+                        if (topScripts.TryGetValue(rootLocalID, out sd))
+                        {
+                            sd.time += time;
+                            sd.memory += mem;
+                        }
+                        else
+                        {
+                            sd = new ScriptTopStatsData();
+                            sd.localID = rootLocalID;
+                            sd.time = time;
+                            sd.memory = mem;
+                            topScripts[rootLocalID] = sd;
+                        }
+                    }
+                }
+            }
+            return topScripts.Values;
+        }
+
+        /**
+            * @brief A float the value is a representative execution time in
+            *        milliseconds of all scripts in the link set.
+            * @param itemIDs = list of scripts in the link set
+            * @returns milliseconds for all those scripts
+            */
         public float GetScriptExecutionTime(List<UUID> itemIDs)
         {
             if((itemIDs == null) || (itemIDs.Count == 0))
@@ -1893,6 +1981,21 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                     time += (float)instance.m_CPUTime;
             }
             return time;
+        }
+
+        public int GetScriptsMemory(List<UUID> itemIDs)
+        {
+            if ((itemIDs == null) || (itemIDs.Count == 0))
+                return 0;
+
+            int memory = 0;
+            foreach (UUID itemID in itemIDs)
+            {
+                XMRInstance instance = GetInstance(itemID);
+                if ((instance != null) && instance.Running)
+                    memory += instance.xmrHeapUsed();
+            }
+            return memory;
         }
 
         /**
@@ -1936,19 +2039,17 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         private XMRInstance[] RebuildObjectInstArray(UUID partUUID)
         {
             List<UUID> itemIDList = m_ObjectItemList[partUUID];
-            int n = 0;
-            foreach(UUID itemID in itemIDList)
+            XMRInstance[] a = new XMRInstance[itemIDList.Count];
+            if(itemIDList.Count > 0)
             {
-                if(m_InstancesDict.ContainsKey(itemID))
-                    n++;
-            }
-
-            XMRInstance[] a = new XMRInstance[n];
-            n = 0;
-            foreach(UUID itemID in itemIDList)
-            {
-                if(m_InstancesDict.TryGetValue(itemID, out a[n]))
-                    n++;
+                int n = 0;
+                foreach (UUID itemID in itemIDList)
+                {
+                    if (m_InstancesDict.TryGetValue(itemID, out a[n]))
+                        n++;
+                }
+                if(n < itemIDList.Count)
+                    Array.Resize(ref a, n);
             }
             m_ObjectInstArray[partUUID] = a;
             return a;
@@ -1968,10 +2069,10 @@ namespace OpenSim.Region.ScriptEngine.Yengine
         /**
          * @brief Manage our threads.
          */
-        public static Thread StartMyThread(ThreadStart start, string name, ThreadPriority priority)
+        public static Thread StartMyThread(ThreadStart start, string name, ThreadPriority priority, int stackSize)
         {
             m_log.Debug("[YEngine]: starting thread " + name);
-            Thread thread = WorkManager.StartThread(start, name, priority, false, false);
+            Thread thread = WorkManager.StartThread(start, name, priority, stackSize);
             return thread;
         }
 

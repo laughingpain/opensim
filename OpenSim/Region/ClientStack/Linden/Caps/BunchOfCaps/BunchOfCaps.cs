@@ -32,6 +32,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Net;
+using System.Threading;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -56,6 +57,7 @@ using Caps = OpenSim.Framework.Capabilities.Caps;
 using OSDArray = OpenMetaverse.StructuredData.OSDArray;
 using OSDMap = OpenMetaverse.StructuredData.OSDMap;
 using PermissionMask = OpenSim.Framework.PermissionMask;
+using Timer = System.Threading.Timer;
 
 namespace OpenSim.Region.ClientStack.Linden
 {
@@ -112,7 +114,7 @@ namespace OpenSim.Region.ClientStack.Linden
         private bool m_enableFreeTestUpload = false; // allows "TEST-" prefix hack
         private bool m_ForceFreeTestUpload = false; // forces all uploads to be test
 
-        private bool m_enableModelUploadTextureToInventory = false; // place uploaded textures also in inventory
+        private bool m_enableModelUploadTextureToInventory = true; // place uploaded textures also in inventory
                                                                     // may not be visible till relog
 
         private bool m_RestrictFreeTestUploadPerms = false; // reduces also the permitions. Needs a creator defined!!
@@ -122,7 +124,10 @@ namespace OpenSim.Region.ClientStack.Linden
 
         private bool m_AllowCapHomeLocation = true;
         private bool m_AllowCapGroupMemberData = true;
-        private  IUserManagement m_UserManager;
+        private bool m_AllowCapLandResources = true;
+        private bool m_AllowCapAttachmentResources = true;
+
+        private IUserManagement m_UserManager;
         private IUserAccountService m_userAccountService;
         private IMoneyModule m_moneyModule;
 
@@ -199,6 +204,14 @@ namespace OpenSim.Region.ClientStack.Linden
                     string GroupMemberDataUrl = CapsConfig.GetString("Cap_GroupMemberData", "localhost");
                     if(GroupMemberDataUrl == String.Empty)
                         m_AllowCapGroupMemberData = false;
+
+                    string LandResourcesUrl = CapsConfig.GetString("Cap_LandResources", "localhost");
+                    if (LandResourcesUrl == String.Empty)
+                        m_AllowCapLandResources = false;
+
+                    string AttachmentResourcesUrl = CapsConfig.GetString("Cap_AttachmentResources", "localhost");
+                    if (AttachmentResourcesUrl == String.Empty)
+                        m_AllowCapAttachmentResources = false;
                 }
             }
 
@@ -273,6 +286,17 @@ namespace OpenSim.Region.ClientStack.Linden
                         new SimpleStreamHandler(GetNewCapPath(), GroupMemberData));
                 }
 
+                if (m_AllowCapLandResources)
+                {
+                    m_HostCapsObj.RegisterSimpleHandler("LandResources",
+                        new SimpleOSDMapHandler("POST", GetNewCapPath(), LandResources));
+                }
+
+                if (m_AllowCapAttachmentResources)
+                {
+                    m_HostCapsObj.RegisterSimpleHandler("AttachmentResources",
+                        new SimpleStreamHandler(GetNewCapPath(), AttachmentResources));
+                }
             }
             catch (Exception e)
             {
@@ -1249,15 +1273,15 @@ namespace OpenSim.Region.ClientStack.Linden
                     if (folder == null)
                         break;
 
-                    StringBuilder sb = LLSDxmlEncode.Start();
-                    LLSDxmlEncode.AddMap(sb);
-                    LLSDxmlEncode.AddElem("folder_id", folder.ID, sb);
-                    LLSDxmlEncode.AddElem("name", folder.Name, sb);
-                    LLSDxmlEncode.AddElem("parent_id", folder.ParentID, sb);
-                    LLSDxmlEncode.AddElem("type", folder.Type, sb);
-                    LLSDxmlEncode.AddEndMap(sb);
+                    osUTF8 sb = LLSDxmlEncode2.Start();
+                    LLSDxmlEncode2.AddMap(sb);
+                    LLSDxmlEncode2.AddElem("folder_id", folder.ID, sb);
+                    LLSDxmlEncode2.AddElem("name", folder.Name, sb);
+                    LLSDxmlEncode2.AddElem("parent_id", folder.ParentID, sb);
+                    LLSDxmlEncode2.AddElem("type", folder.Type, sb);
+                    LLSDxmlEncode2.AddEndMap(sb);
 
-                    httpResponse.RawBuffer = LLSDxmlEncode.EndToNBBytes(sb);
+                    httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(sb);
                     httpResponse.StatusCode = (int)HttpStatusCode.OK;
                     return;
                 }
@@ -1296,14 +1320,14 @@ namespace OpenSim.Region.ClientStack.Linden
 
                 m_Scene.TryGetClient(agentID, out client);
 
-                if (objectID != UUID.Zero)
+                if (!objectID.IsZero())
                 {
                     SceneObjectPart part = m_Scene.GetSceneObjectPart(objectID);
                     if(part == null)
                         throw new Exception("failed to find object with notecard item" + notecardID.ToString());
 
                     TaskInventoryItem taskItem = part.Inventory.GetInventoryItem(notecardID);
-                    if (taskItem == null || taskItem.AssetID == UUID.Zero)
+                    if (taskItem == null || taskItem.AssetID.IsZero())
                         throw new Exception("Failed to find notecard item" + notecardID.ToString());
 
                     if (!m_Scene.Permissions.CanCopyObjectInventory(notecardID, objectID, agentID))
@@ -1328,10 +1352,10 @@ namespace OpenSim.Region.ClientStack.Linden
                         return;
                     }
 
-                    if (notecardID != UUID.Zero)
+                    if (!notecardID.IsZero())
                     {
                         InventoryItemBase noteItem = m_Scene.InventoryService.GetItem(agentID, notecardID);
-                        if (noteItem == null || noteItem.AssetID == UUID.Zero)
+                        if (noteItem == null || noteItem.AssetID.IsZero())
                             throw new Exception("Failed to find notecard item" + notecardID.ToString());
                         noteAssetID = noteItem.AssetID;
                     }
@@ -1361,7 +1385,7 @@ namespace OpenSim.Region.ClientStack.Linden
 
                 // find where to put it
                 InventoryFolderBase folder = null;
-                if (folderID != UUID.Zero)
+                if (!folderID.IsZero())
                     folder = m_Scene.InventoryService.GetFolder(agentID, folderID);
 
                 if (folder == null && Enum.IsDefined(typeof(FolderType), (sbyte)item.AssetType))
@@ -1468,13 +1492,13 @@ namespace OpenSim.Region.ClientStack.Linden
                 return;
             }
 
-            StringBuilder lsl = LLSDxmlEncode.Start();
+            osUTF8 lsl = LLSDxmlEncode2.Start();
             
             if(object_ids.Count == 0)
-                LLSDxmlEncode.AddEmptyMap(lsl);
+                LLSDxmlEncode2.AddEmptyMap(lsl);
             else
             {
-                LLSDxmlEncode.AddMap(lsl);
+                LLSDxmlEncode2.AddMap(lsl);
                 for (int i = 0 ; i < object_ids.Count ; i++)
                 {
                     UUID uuid = object_ids[i].AsUUID();
@@ -1482,21 +1506,21 @@ namespace OpenSim.Region.ClientStack.Linden
                     SceneObjectPart obj = m_Scene.GetSceneObjectPart(uuid);
                     if (obj != null)
                     {                  
-                        LLSDxmlEncode.AddMap(uuid.ToString(),lsl);
+                        LLSDxmlEncode2.AddMap(uuid.ToString(),lsl);
 
-                        LLSDxmlEncode.AddElem("PhysicsShapeType", obj.PhysicsShapeType, lsl);
-                        LLSDxmlEncode.AddElem("Density", obj.Density, lsl);
-                        LLSDxmlEncode.AddElem("Friction", obj.Friction, lsl);
-                        LLSDxmlEncode.AddElem("Restitution", obj.Restitution, lsl);
-                        LLSDxmlEncode.AddElem("GravityMultiplier", obj.GravityModifier, lsl);
+                        LLSDxmlEncode2.AddElem("PhysicsShapeType", obj.PhysicsShapeType, lsl);
+                        LLSDxmlEncode2.AddElem("Density", obj.Density, lsl);
+                        LLSDxmlEncode2.AddElem("Friction", obj.Friction, lsl);
+                        LLSDxmlEncode2.AddElem("Restitution", obj.Restitution, lsl);
+                        LLSDxmlEncode2.AddElem("GravityMultiplier", obj.GravityModifier, lsl);
 
-                        LLSDxmlEncode.AddEndMap(lsl);
+                        LLSDxmlEncode2.AddEndMap(lsl);
                     }
-                LLSDxmlEncode.AddEndMap(lsl);
+                LLSDxmlEncode2.AddEndMap(lsl);
                 }
             }
 
-            httpResponse.RawBuffer = LLSDxmlEncode.EndToNBBytes(lsl);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(lsl);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -1513,14 +1537,14 @@ namespace OpenSim.Region.ClientStack.Linden
                 return;
             }
 
-            StringBuilder lsl = LLSDxmlEncode.Start(512);
+            osUTF8 lsl = LLSDxmlEncode2.Start(512);
             
             if(object_ids.Count == 0)
-                LLSDxmlEncode.AddEmptyMap(lsl);
+                LLSDxmlEncode2.AddEmptyMap(lsl);
             else
             {
                 bool haveone = false;
-                LLSDxmlEncode.AddMap(lsl);
+                LLSDxmlEncode2.AddMap(lsl);
                 for (int i = 0; i < object_ids.Count; i++)
                 {
                     UUID uuid = object_ids[i].AsUUID();
@@ -1539,35 +1563,324 @@ namespace OpenSim.Region.ClientStack.Linden
 
                         grp.GetResourcesCosts(part,out linksetCost,out linksetPhysCost,out partCost,out partPhysCost);
 
-                        LLSDxmlEncode.AddMap(uuid.ToString(), lsl);
+                        LLSDxmlEncode2.AddMap(uuid.ToString(), lsl);
 
-                        LLSDxmlEncode.AddElem("linked_set_resource_cost", linksetCost, lsl);
-                        LLSDxmlEncode.AddElem("resource_cost", partCost, lsl);
-                        LLSDxmlEncode.AddElem("physics_cost", partPhysCost, lsl);
-                        LLSDxmlEncode.AddElem("linked_set_physics_cost", linksetPhysCost, lsl);
-                        LLSDxmlEncode.AddElem("resource_limiting_type", "legacy", lsl);
+                        LLSDxmlEncode2.AddElem("linked_set_resource_cost", linksetCost, lsl);
+                        LLSDxmlEncode2.AddElem("resource_cost", partCost, lsl);
+                        LLSDxmlEncode2.AddElem("physics_cost", partPhysCost, lsl);
+                        LLSDxmlEncode2.AddElem("linked_set_physics_cost", linksetPhysCost, lsl);
+                        LLSDxmlEncode2.AddElem("resource_limiting_type", "legacy", lsl);
 
-                        LLSDxmlEncode.AddEndMap(lsl);
+                        LLSDxmlEncode2.AddEndMap(lsl);
                     }
                 }
                 if(!haveone)
                 {
-                    LLSDxmlEncode.AddMap(UUID.Zero.ToString(), lsl);
-                    LLSDxmlEncode.AddElem("linked_set_resource_cost", 0, lsl);
-                    LLSDxmlEncode.AddElem("resource_cost", 0, lsl);
-                    LLSDxmlEncode.AddElem("physics_cost", 0, lsl);
-                    LLSDxmlEncode.AddElem("linked_set_physics_cost", 0, lsl);
-                    LLSDxmlEncode.AddElem("resource_limiting_type", "legacy", lsl);
-                    LLSDxmlEncode.AddEndMap(lsl);
+                    LLSDxmlEncode2.AddMap(UUID.Zero.ToString(), lsl);
+                    LLSDxmlEncode2.AddElem("linked_set_resource_cost", 0, lsl);
+                    LLSDxmlEncode2.AddElem("resource_cost", 0, lsl);
+                    LLSDxmlEncode2.AddElem("physics_cost", 0, lsl);
+                    LLSDxmlEncode2.AddElem("linked_set_physics_cost", 0, lsl);
+                    LLSDxmlEncode2.AddElem("resource_limiting_type", "legacy", lsl);
+                    LLSDxmlEncode2.AddEndMap(lsl);
                 }
-                LLSDxmlEncode.AddEndMap(lsl);
+                LLSDxmlEncode2.AddEndMap(lsl);
             }
 
-            httpResponse.RawBuffer = LLSDxmlEncode.EndToNBBytes(lsl);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(lsl);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
-        public void ResourceCostSelected(IOSHttpRequest httpRequest,IOSHttpResponse httpResponse, OSDMap req)
+        public struct AttachmentScriptInfo
+        {
+            public UUID id;
+            public string name;
+            public Vector3 pos;
+            public int memory;
+            public int urls;
+        };
+
+        public void AttachmentResources(IOSHttpRequest httpRequest, IOSHttpResponse httpResponse)
+        {
+            if(m_Scene.TryGetScenePresence(m_AgentID, out ScenePresence sp) && !sp.IsChildAgent && !sp.IsDeleted && !sp.IsInTransit)
+            {
+                int totalmem = 0;
+                int totalurls = 0;
+                List<SceneObjectGroup> atts = sp.GetAttachments();
+                Dictionary<byte, List<AttachmentScriptInfo>> perAttPoints = null;
+                if (atts.Count > 0)
+                {
+                    IUrlModule urlModule = m_Scene.RequestModuleInterface<IUrlModule>();
+                    perAttPoints = new Dictionary<byte, List<AttachmentScriptInfo>>();
+                    foreach (SceneObjectGroup so in atts)
+                    {
+                        byte attp = so.GetAttachmentPoint();
+                        if(!so.ScriptsMemory(out int mem))
+                            continue;
+                        int urls_used = 0;
+                        totalmem += mem;
+                        if (urlModule != null)
+                        {
+                            urls_used = urlModule.GetUrlCount(so.UUID);
+                            totalurls += urls_used;
+                        }
+                        AttachmentScriptInfo info = new AttachmentScriptInfo()
+                        {
+                            id = so.UUID,
+                            name = so.Name,
+                            memory = mem,
+                            urls = urls_used,
+                            pos = so.AbsolutePosition
+                        };
+                        if(perAttPoints.TryGetValue(attp, out List<AttachmentScriptInfo> la))
+                            la.Add(info);
+                        else
+                            perAttPoints[attp] = new List<AttachmentScriptInfo>(){  info };
+                    }
+                }
+                osUTF8 sb = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(sb);
+
+                if (atts.Count > 0)
+                {
+                    LLSDxmlEncode2.AddArray("attachments", sb);
+                    foreach (KeyValuePair<byte, List<AttachmentScriptInfo>> kvp in perAttPoints)
+                    {
+                        LLSDxmlEncode2.AddMap(sb);
+                        LLSDxmlEncode2.AddElem("location", SLUtil.GetAttachmentName(kvp.Key), sb);
+                        LLSDxmlEncode2.AddArray("objects", sb);
+                        foreach(AttachmentScriptInfo asi in kvp.Value)
+                        {
+                            LLSDxmlEncode2.AddMap(sb);
+                            LLSDxmlEncode2.AddElem("id", asi.id, sb);
+                            LLSDxmlEncode2.AddElem("is_group_owned", (int)0, sb);
+                            LLSDxmlEncode2.AddElem("location", asi.pos, sb);
+                            LLSDxmlEncode2.AddElem("name", asi.name, sb);
+                            LLSDxmlEncode2.AddElem("owner_id", m_AgentID, sb);
+                            LLSDxmlEncode2.AddMap("resources", sb);
+                            if (asi.memory > 0)
+                                LLSDxmlEncode2.AddElem("memory", asi.memory, sb);
+                            if (asi.urls > 0)
+                                LLSDxmlEncode2.AddElem("urls", asi.urls, sb);
+                            LLSDxmlEncode2.AddEndMap(sb);
+                            LLSDxmlEncode2.AddEndMap(sb);
+                        }
+                        LLSDxmlEncode2.AddEndArray(sb);
+                        LLSDxmlEncode2.AddEndMap(sb);
+                    }
+                    LLSDxmlEncode2.AddEndArray(sb); //attachments
+                }
+                else
+                    LLSDxmlEncode2.AddEmptyArray("attachments", sb);
+
+                LLSDxmlEncode2.AddMap("summary", sb);
+                LLSDxmlEncode2.AddArray("available", sb);
+
+                int maxurls = totalurls <= 38? 38: totalurls; // we don't limit this
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", maxurls, sb);
+                LLSDxmlEncode2.AddElem("type", "urls", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", (int)-1, sb);
+                LLSDxmlEncode2.AddElem("type", "memory", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddEndArray(sb); //available
+
+                LLSDxmlEncode2.AddArray("used", sb);
+
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount",totalurls, sb);
+                LLSDxmlEncode2.AddElem("type", "urls", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", totalmem, sb);
+                LLSDxmlEncode2.AddElem("type", "memory", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddEndArray(sb); //used
+
+                LLSDxmlEncode2.AddEndMap(sb); // summary
+
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(sb);
+                httpResponse.StatusCode = (int)HttpStatusCode.OK;
+                return;
+            }
+            httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
+        }
+
+        public class ScriptInfoForParcel
+        {
+            public UUID id;
+            public UUID owner;
+            public string name;
+            public int memory;
+            public int urls;
+            public bool groupOwned;
+            public Vector3 pos;
+        };
+
+        public class ParcelScriptInfo
+        {
+            public UUID id;
+            public string name;
+            public int localID;
+            public List<ScriptInfoForParcel> objects;
+        };
+
+        public void LandResources(IOSHttpRequest httpRequest, IOSHttpResponse httpResponse, OSDMap req)
+        {
+            if (!m_Scene.TryGetScenePresence(m_AgentID, out ScenePresence sp))
+            {
+                httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
+                return;
+            }
+
+            UUID parcelOwner;
+            LandData landdata = null;
+            ulong myHandler = m_Scene.RegionInfo.RegionHandle;
+            if (req.TryGetValue("parcel_id", out OSD tmp) && tmp is OSDUUID)
+            {
+                UUID parcelID = tmp.AsUUID();
+                if (Util.ParseFakeParcelID(parcelID, out ulong regionHandle, out uint x, out uint y) && regionHandle == myHandler)
+                {
+                    ILandObject land = m_Scene.LandChannel.GetLandObjectClippedXY(x, y);
+                    if (land != null)
+                        landdata = land.LandData;
+                    land = null;
+                }
+            }
+            if(landdata == null)
+            {
+                httpResponse.StatusCode = (int)HttpStatusCode.NotFound;
+                return;
+            }
+            parcelOwner = landdata.OwnerID;
+
+            int showType = 0;
+            if (sp.IsGod || m_Scene.Permissions.IsEstateManager(m_AgentID))
+                showType = 1;
+            else
+            {
+                if (parcelOwner == m_AgentID)
+                    showType = 2;
+                else if (!landdata.GroupID.IsZero())
+                {
+                    ulong powers = sp.ControllingClient.GetGroupPowers(landdata.GroupID);
+                    if ((powers & (ulong)(GroupPowers.ReturnGroupOwned | GroupPowers.ReturnGroupSet | GroupPowers.ReturnNonGroup)) != 0)
+                        showType = 2;
+                }
+            }
+            landdata = null;
+
+            int totalmem = 0;
+            int totalurls = 0;
+            bool ownerparcels = showType != 1;
+            bool showdetail = showType != 0;
+
+            List<ParcelScriptInfo> parcelsInfo = null;
+            IUrlModule urlModule = m_Scene.RequestModuleInterface<IUrlModule>();
+
+            List<ILandObject>  allParcels = m_Scene.LandChannel.AllParcels();
+            if (showdetail)
+                parcelsInfo = new List<ParcelScriptInfo>(allParcels.Count);
+
+            for (int p = 0; p < allParcels.Count; ++p)
+            {
+                ILandObject parcel = allParcels[p];
+                landdata = parcel.LandData;
+                if (landdata == null)
+                    continue;
+                if(ownerparcels && landdata.OwnerID != parcelOwner)
+                    continue;
+
+                ParcelScriptInfo pi = null;
+                if (showdetail)
+                {
+                    pi = new ParcelScriptInfo
+                    {
+                        name = landdata.Name,
+                        localID = landdata.LocalID,
+                        id = landdata.FakeID,
+                        objects = new List<ScriptInfoForParcel>()
+                    };
+                }
+
+                ISceneObject[] isops = parcel.GetSceneObjectGroups();
+                for(int i = 0; i < isops.Length; ++i)
+                {
+                    SceneObjectGroup so = isops[i] as SceneObjectGroup;
+                    if(so == null || so.IsDeleted || so.inTransit || so.IsAttachment)
+                        continue;
+
+                    if(!so.ScriptsMemory(out int mem))
+                        continue;
+
+                    int urls_used = 0;
+                    totalmem += mem;
+                    if (urlModule != null)
+                    {
+                        urls_used = urlModule.GetUrlCount(so.UUID);
+                        totalurls += urls_used;
+                    }
+
+                    if (showdetail)
+                    {
+                        ScriptInfoForParcel sip = new ScriptInfoForParcel()
+                        {
+                            id = so.UUID,
+                            owner = so.OwnerID,
+                            name = so.Name,
+                            memory = mem,
+                            urls = urls_used,
+                            groupOwned = (so.OwnerID == so.GroupID),
+                            pos = so.AbsolutePosition
+                        };
+                        pi.objects.Add(sip);
+                    }
+                }
+                if (showdetail)
+                    parcelsInfo.Add(pi);
+            }
+            landdata = null;
+
+            osUTF8 lsl = LLSDxmlEncode2.Start();
+            LLSDxmlEncode2.AddMap(lsl);
+
+            string baseurl = m_HostCapsObj.SSLCaps ? "https://" : "http://";
+            baseurl += m_HostCapsObj.HostName + ":" + m_HostCapsObj.Port.ToString();
+
+            string SRSPath = GetNewCapPath();
+            ScriptResourceSummary srs =
+                new ScriptResourceSummary(m_Scene, m_AgentID, m_HostCapsObj.HttpListener, SRSPath, httpRequest.RemoteIPEndPoint.Address,
+                    totalmem, totalurls);
+            m_HostCapsObj.HttpListener.AddSimpleStreamHandler(new SimpleStreamHandler(SRSPath, srs.ScriptResourceSummaryCap));
+            string SRSURL = baseurl + SRSPath;
+            LLSDxmlEncode2.AddElem("ScriptResourceSummary", SRSURL, lsl);
+
+            if(showdetail)
+            {
+                string SRDPath = GetNewCapPath();
+                string SRDURL = baseurl + SRDPath;
+                ScriptResourceDetails srd =
+                    new ScriptResourceDetails(m_Scene, m_AgentID, m_HostCapsObj.HttpListener, SRDPath, httpRequest.RemoteIPEndPoint.Address,
+                    parcelsInfo);
+                m_HostCapsObj.HttpListener.AddSimpleStreamHandler(new SimpleStreamHandler(SRDPath, srd.ScriptResourceDetailsCap));
+                LLSDxmlEncode2.AddElem("ScriptResourceDetails", SRDURL, lsl);
+            }
+
+            LLSDxmlEncode2.AddEndMap(lsl);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(lsl);
+            httpResponse.StatusCode = (int)HttpStatusCode.OK;
+            return;
+        }
+
+        public void ResourceCostSelected(IOSHttpRequest httpRequest, IOSHttpResponse httpResponse, OSDMap req)
         {
             float phys=0;
             float stream=0;
@@ -1618,20 +1931,20 @@ namespace OpenSim.Region.ClientStack.Linden
                 }
             }
 
-            StringBuilder lsl = LLSDxmlEncode.Start();
-            LLSDxmlEncode.AddMap(lsl);
+            osUTF8 lsl = LLSDxmlEncode2.Start();
+            LLSDxmlEncode2.AddMap(lsl);
 
-            LLSDxmlEncode.AddMap("selected", lsl);
+            LLSDxmlEncode2.AddMap("selected", lsl);
 
-            LLSDxmlEncode.AddElem("physics", phys, lsl);
-            LLSDxmlEncode.AddElem("streaming", stream, lsl);
-            LLSDxmlEncode.AddElem("simulation", simul, lsl);
+            LLSDxmlEncode2.AddElem("physics", phys, lsl);
+            LLSDxmlEncode2.AddElem("streaming", stream, lsl);
+            LLSDxmlEncode2.AddElem("simulation", simul, lsl);
 
-            LLSDxmlEncode.AddEndMap(lsl);
-            LLSDxmlEncode.AddEndMap(lsl);
+            LLSDxmlEncode2.AddEndMap(lsl);
+            LLSDxmlEncode2.AddEndMap(lsl);
 
             // resp["transaction_id"] = "undef";
-            httpResponse.RawBuffer = LLSDxmlEncode.EndToNBBytes(lsl);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(lsl);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -1745,7 +2058,7 @@ namespace OpenSim.Region.ClientStack.Linden
 
                 ulong gpowers = client.GetGroupPowers(land.LandData.GroupID);
                 SceneObjectGroup telehub = null;
-                if (m_Scene.RegionInfo.RegionSettings.TelehubObject != UUID.Zero)
+                if (!m_Scene.RegionInfo.RegionSettings.TelehubObject.IsZero())
                 // Does the telehub exist in the scene?
                     telehub = m_Scene.GetSceneObjectGroup(m_Scene.RegionInfo.RegionSettings.TelehubObject);
 
@@ -1863,7 +2176,7 @@ namespace OpenSim.Region.ClientStack.Linden
                     break;
 
                 groupID = tmp.AsUUID();
-                if(groupID == UUID.Zero)
+                if(groupID.IsZero())
                     break;
 
                 List<GroupRolesData> roles = m_GroupsModule.GroupRoleDataRequest(client, groupID);
@@ -1975,221 +2288,427 @@ namespace OpenSim.Region.ClientStack.Linden
             NameValueCollection query = httpRequest.QueryString;
             string[] ids = query.GetValues("ids");
 
-            Dictionary<UUID,string> names = m_UserManager.GetUsersNames(ids, m_scopeID);
-            StringBuilder lsl = LLSDxmlEncode.Start(names.Count * 256 + 256);
-            LLSDxmlEncode.AddMap(lsl);
-            int ct = 0;
-            if(names.Count == 0)
-                LLSDxmlEncode.AddEmptyArray("agents", lsl);
+            osUTF8 lsl;
+            if(ids.Length == 0)
+            {
+                lsl = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(lsl);
+                LLSDxmlEncode2.AddEmptyArray("agents", lsl);
+            }
             else
             {
-                LLSDxmlEncode.AddArray("agents", lsl);
+                List<UserData> names = m_UserManager.GetKnownUsers(ids, m_scopeID);
+                lsl = LLSDxmlEncode2.Start(names.Count * 256 + 256);
 
-                foreach (KeyValuePair<UUID,string> kvp in names)
+                LLSDxmlEncode2.AddMap(lsl);
+                if (names.Count == 0)
+                    LLSDxmlEncode2.AddEmptyArray("agents", lsl);
+                else
                 {
-                    string[] parts = kvp.Value.Split(new char[] {' '});
-                    string fullname = kvp.Value;
+                    LLSDxmlEncode2.AddArray("agents", lsl);
 
-                    if (string.IsNullOrEmpty(kvp.Value))
+                    foreach (UserData ud in names)
                     {
-                        parts = new string[] {"(hippos)", ""};
-                        fullname = "(hippos)";
+                        // dont tell about unknown users, we can't send them back on Bad either
+                        if (string.IsNullOrEmpty(ud.FirstName) || ud.FirstName.Equals("Unkown"))
+                            continue;
+
+                        string fullname = ud.FirstName + " " + ud.LastName;
+                        LLSDxmlEncode2.AddMap(lsl);
+                        LLSDxmlEncode2.AddElem("username", fullname, lsl);
+                        LLSDxmlEncode2.AddElem("display_name", fullname, lsl);
+                        LLSDxmlEncode2.AddElem("display_name_next_update", DateTime.UtcNow.AddDays(8), lsl);
+                        LLSDxmlEncode2.AddElem("display_name_expires", DateTime.UtcNow.AddMonths(1), lsl);
+                        LLSDxmlEncode2.AddElem("legacy_first_name", ud.FirstName, lsl);
+                        LLSDxmlEncode2.AddElem("legacy_last_name", ud.LastName, lsl);
+                        LLSDxmlEncode2.AddElem("id", ud.Id, lsl);
+                        LLSDxmlEncode2.AddElem("is_display_name_default", true, lsl);
+                        LLSDxmlEncode2.AddEndMap(lsl);
                     }
-
-                    if(kvp.Key == UUID.Zero)
-                        continue;
-
-                // dont tell about unknown users, we can't send them back on Bad either
-                    if(parts[0] == "Unknown")
-                         continue;
-
-                    LLSDxmlEncode.AddMap(lsl);
-                    LLSDxmlEncode.AddElem("display_name_next_update", DateTime.UtcNow.AddDays(8), lsl);
-                    LLSDxmlEncode.AddElem("display_name_expires", DateTime.UtcNow.AddMonths(1), lsl);
-                    LLSDxmlEncode.AddElem("display_name", fullname, lsl);
-                    LLSDxmlEncode.AddElem("legacy_first_name", parts[0], lsl);
-                    LLSDxmlEncode.AddElem("legacy_last_name", parts[1], lsl);
-                    LLSDxmlEncode.AddElem("username", fullname, lsl);
-                    LLSDxmlEncode.AddElem("id", kvp.Key, lsl);
-                    LLSDxmlEncode.AddElem("is_display_name_default", true, lsl);
-                    LLSDxmlEncode.AddEndMap(lsl);
-                    ct++;
+                    LLSDxmlEncode2.AddEndArray(lsl);
                 }
-                LLSDxmlEncode.AddEndArray(lsl);
             }
-        
-            LLSDxmlEncode.AddEndMap(lsl);
+            LLSDxmlEncode2.AddEndMap(lsl);
 
-            httpResponse.RawBuffer = LLSDxmlEncode.EndToNBBytes(lsl);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToNBBytes(lsl);
             httpResponse.ContentType = "application/llsd+xml";
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
-    }
 
-    public class AssetUploader
-    {
-        private static readonly ILog m_log =
-            LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-
-
-        public event UpLoadedAsset OnUpLoad;
-        private UpLoadedAsset handlerUpLoad = null;
-
-        private string uploaderPath = String.Empty;
-        private UUID newAssetID;
-        private UUID inventoryItemID;
-        private UUID parentFolder;
-        private IHttpServer httpListener;
-        private bool m_dumpAssetsToFile;
-        private string m_assetName = String.Empty;
-        private string m_assetDes = String.Empty;
-
-        private string m_invType = String.Empty;
-        private string m_assetType = String.Empty;
-        private int m_cost;
-        private string m_error = String.Empty;
-
-        private Timer m_timeoutTimer = new Timer();
-        private UUID m_texturesFolder;
-        private int m_nreqtextures;
-        private int m_nreqmeshs;
-        private int m_nreqinstances;
-        private bool m_IsAtestUpload;
-
-        private int m_nextOwnerMask;
-        private int m_groupMask;
-        private int m_everyoneMask;
-        private int[] m_meshesSides;
-
-        public AssetUploader(string assetName, string description, UUID assetID, UUID inventoryItem,
-                                UUID parentFolderID, string invType, string assetType, string path,
-                                IHttpServer httpServer, bool dumpAssetsToFile,
-                                int totalCost, UUID texturesFolder, int nreqtextures, int nreqmeshs, int nreqinstances,
-                                bool IsAtestUpload, int nextOwnerMask, int groupMask, int everyoneMask, int[] meshesSides)
+        public class AssetUploader
         {
-            m_assetName = assetName;
-            m_assetDes = description;
-            newAssetID = assetID;
-            inventoryItemID = inventoryItem;
-            uploaderPath = path;
-            httpListener = httpServer;
-            parentFolder = parentFolderID;
-            m_assetType = assetType;
-            m_invType = invType;
-            m_dumpAssetsToFile = dumpAssetsToFile;
-            m_cost = totalCost;
+            private static readonly ILog m_log =
+                LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
-            m_texturesFolder = texturesFolder;
-            m_nreqtextures = nreqtextures;
-            m_nreqmeshs = nreqmeshs;
-            m_nreqinstances = nreqinstances;
-            m_IsAtestUpload = IsAtestUpload;
+            public event UpLoadedAsset OnUpLoad;
+            private UpLoadedAsset handlerUpLoad = null;
 
-            m_timeoutTimer.Elapsed += TimedOut;
-            m_timeoutTimer.Interval = 120000;
-            m_timeoutTimer.AutoReset = false;
-            m_timeoutTimer.Start();
+            private string uploaderPath = String.Empty;
+            private UUID newAssetID;
+            private UUID inventoryItemID;
+            private UUID parentFolder;
+            private IHttpServer httpListener;
+            private bool m_dumpAssetsToFile;
+            private string m_assetName = String.Empty;
+            private string m_assetDes = String.Empty;
 
-            m_nextOwnerMask = nextOwnerMask;
-            m_groupMask = groupMask;
-            m_everyoneMask = everyoneMask;
+            private string m_invType = String.Empty;
+            private string m_assetType = String.Empty;
+            private int m_cost;
+            private string m_error = String.Empty;
 
-            m_meshesSides = meshesSides;
-        }
+            private System.Timers.Timer m_timeoutTimer;
+            private UUID m_texturesFolder;
+            private int m_nreqtextures;
+            private int m_nreqmeshs;
+            private int m_nreqinstances;
+            private bool m_IsAtestUpload;
 
-        /// <summary>
-        /// Handle raw asset upload data via the capability.
-        /// </summary>
-        /// <param name="data"></param>
-        /// <param name="path"></param>
-        /// <param name="param"></param>
-        /// <returns></returns>
-        public string uploaderCaps(byte[] data, string path, string param)
-        {
-            UUID inv = inventoryItemID;
-            string res = String.Empty;
-            LLSDAssetUploadComplete uploadComplete = new LLSDAssetUploadComplete();
-/*
-            uploadComplete.new_asset = newAssetID.ToString();
-            uploadComplete.new_inventory_item = inv;
-            uploadComplete.state = "complete";
+            private int m_nextOwnerMask;
+            private int m_groupMask;
+            private int m_everyoneMask;
+            private int[] m_meshesSides;
 
-            res = LLSDHelpers.SerialiseLLSDReply(uploadComplete);
-*/
-            m_timeoutTimer.Stop();
-            httpListener.RemoveStreamHandler("POST", uploaderPath);
-
-            // TODO: probably make this a better set of extensions here
-            string extension = ".jp2";
-            if (m_invType != "image")
+            public AssetUploader(string assetName, string description, UUID assetID, UUID inventoryItem,
+                                    UUID parentFolderID, string invType, string assetType, string path,
+                                    IHttpServer httpServer, bool dumpAssetsToFile,
+                                    int totalCost, UUID texturesFolder, int nreqtextures, int nreqmeshs, int nreqinstances,
+                                    bool IsAtestUpload, int nextOwnerMask, int groupMask, int everyoneMask, int[] meshesSides)
             {
-                extension = ".dat";
+                m_assetName = assetName;
+                m_assetDes = description;
+                newAssetID = assetID;
+                inventoryItemID = inventoryItem;
+                uploaderPath = path;
+                httpListener = httpServer;
+                parentFolder = parentFolderID;
+                m_assetType = assetType;
+                m_invType = invType;
+                m_dumpAssetsToFile = dumpAssetsToFile;
+                m_cost = totalCost;
+
+                m_texturesFolder = texturesFolder;
+                m_nreqtextures = nreqtextures;
+                m_nreqmeshs = nreqmeshs;
+                m_nreqinstances = nreqinstances;
+                m_IsAtestUpload = IsAtestUpload;
+
+                m_timeoutTimer = new System.Timers.Timer();
+                m_timeoutTimer.Elapsed += TimedOut;
+                m_timeoutTimer.Interval = 120000;
+                m_timeoutTimer.AutoReset = false;
+                m_timeoutTimer.Start();
+
+                m_nextOwnerMask = nextOwnerMask;
+                m_groupMask = groupMask;
+                m_everyoneMask = everyoneMask;
+
+                m_meshesSides = meshesSides;
             }
 
-            if (m_dumpAssetsToFile)
+            /// <summary>
+            /// Handle raw asset upload data via the capability.
+            /// </summary>
+            /// <param name="data"></param>
+            /// <param name="path"></param>
+            /// <param name="param"></param>
+            /// <returns></returns>
+            public string uploaderCaps(byte[] data, string path, string param)
             {
-                SaveAssetToFile(m_assetName + extension, data);
-            }
-            handlerUpLoad = OnUpLoad;
-            if (handlerUpLoad != null)
-            {
-                handlerUpLoad(m_assetName, m_assetDes, newAssetID, inv, parentFolder, data, m_invType, m_assetType,
-                    m_cost, m_texturesFolder, m_nreqtextures, m_nreqmeshs, m_nreqinstances, m_IsAtestUpload,
-                    ref m_error, ref m_nextOwnerMask, ref m_groupMask, ref m_everyoneMask, m_meshesSides);
-            }
-
-            uploadComplete.new_next_owner_mask = m_nextOwnerMask;
-            uploadComplete.new_group_mask = m_groupMask;
-            uploadComplete.new_everyone_mask = m_everyoneMask;
-
-            if (m_error == String.Empty)
-            {
+                UUID inv = inventoryItemID;
+                string res = String.Empty;
+                LLSDAssetUploadComplete uploadComplete = new LLSDAssetUploadComplete();
+    /*
                 uploadComplete.new_asset = newAssetID.ToString();
                 uploadComplete.new_inventory_item = inv;
-                //                if (m_texturesFolder != UUID.Zero)
-                //                    uploadComplete.new_texture_folder_id = m_texturesFolder;
-               if (m_IsAtestUpload)
-               {
-                  LLSDAssetUploadError resperror = new LLSDAssetUploadError();
-                  resperror.message = "Upload SUCCESSFUL for testing purposes only. Other uses are prohibited. Item will not work after 48 hours or on other regions";
-                  resperror.identifier = inv;
+                uploadComplete.state = "complete";
+
+                res = LLSDHelpers.SerialiseLLSDReply(uploadComplete);
+    */
+                m_timeoutTimer.Stop();
+                httpListener.RemoveStreamHandler("POST", uploaderPath);
+
+                // TODO: probably make this a better set of extensions here
+                string extension = ".jp2";
+                if (m_invType != "image")
+                {
+                    extension = ".dat";
+                }
+
+                if (m_dumpAssetsToFile)
+                {
+                    SaveAssetToFile(m_assetName + extension, data);
+                }
+                handlerUpLoad = OnUpLoad;
+                if (handlerUpLoad != null)
+                {
+                    handlerUpLoad(m_assetName, m_assetDes, newAssetID, inv, parentFolder, data, m_invType, m_assetType,
+                        m_cost, m_texturesFolder, m_nreqtextures, m_nreqmeshs, m_nreqinstances, m_IsAtestUpload,
+                        ref m_error, ref m_nextOwnerMask, ref m_groupMask, ref m_everyoneMask, m_meshesSides);
+                }
+
+                uploadComplete.new_next_owner_mask = m_nextOwnerMask;
+                uploadComplete.new_group_mask = m_groupMask;
+                uploadComplete.new_everyone_mask = m_everyoneMask;
+
+                if (m_error == String.Empty)
+                {
+                    uploadComplete.new_asset = newAssetID.ToString();
+                    uploadComplete.new_inventory_item = inv;
+                    //                if (m_texturesFolder != UUID.Zero)
+                    //                    uploadComplete.new_texture_folder_id = m_texturesFolder;
+                   if (m_IsAtestUpload)
+                   {
+                      LLSDAssetUploadError resperror = new LLSDAssetUploadError();
+                      resperror.message = "Upload SUCCESSFUL for testing purposes only. Other uses are prohibited. Item will not work after 48 hours or on other regions";
+                      resperror.identifier = inv;
                     
-                  uploadComplete.error = resperror;
-               }
-               uploadComplete.state = "complete";
+                      uploadComplete.error = resperror;
+                   }
+                   uploadComplete.state = "complete";
+                }
+                else
+                {
+                    LLSDAssetUploadError resperror = new LLSDAssetUploadError();
+                    resperror.message = m_error;
+                    resperror.identifier = inv;
+
+                    uploadComplete.error = resperror;
+                    uploadComplete.state = "failed";
+                }
+
+                res = LLSDHelpers.SerialiseLLSDReply(uploadComplete);
+                return res;
             }
-            else
+
+            private void TimedOut(object sender, ElapsedEventArgs args)
             {
-                LLSDAssetUploadError resperror = new LLSDAssetUploadError();
-                resperror.message = m_error;
-                resperror.identifier = inv;
-
-                uploadComplete.error = resperror;
-                uploadComplete.state = "failed";
+                m_log.InfoFormat("[CAPS]: Removing URL and handler for timed out mesh upload");
+                httpListener.RemoveStreamHandler("POST", uploaderPath);
             }
 
-            res = LLSDHelpers.SerialiseLLSDReply(uploadComplete);
-            return res;
+            private static void SaveAssetToFile(string filename, byte[] data)
+            {
+                string assetPath = "UserAssets";
+                if (!Directory.Exists(assetPath))
+                {
+                    Directory.CreateDirectory(assetPath);
+                }
+                FileStream fs = File.Create(Path.Combine(assetPath, Util.SafeFileName(filename)));
+                BinaryWriter bw = new BinaryWriter(fs);
+                bw.Write(data);
+                bw.Close();
+                fs.Close();
+            }
         }
 
-        private void TimedOut(object sender, ElapsedEventArgs args)
+        public class ExpiringCapBase
         {
-            m_log.InfoFormat("[CAPS]: Removing URL and handler for timed out mesh upload");
-            httpListener.RemoveStreamHandler("POST", uploaderPath);
+            protected IHttpServer m_httpListener;
+            protected string m_mypath;
+            protected Timer m_timeoutTimer;
+
+            public ExpiringCapBase(IHttpServer httpServer, string path)
+            {
+                m_httpListener = httpServer;
+                m_mypath = path;
+            }
+
+            public virtual void Start(int timeout)
+            {
+                m_timeoutTimer = new Timer(Timedout, null, timeout, Timeout.Infinite);
+            }
+
+            public virtual void Stop()
+            {
+                m_httpListener.RemoveSimpleStreamHandler(m_mypath);
+                m_timeoutTimer.Dispose();
+                m_timeoutTimer = null;
+            }
+
+            public virtual void Timedout(object state)
+            {
+                Stop();
+                m_log.InfoFormat("[CAPS]: Removing URL and handler for timed out service");
+            }
         }
 
-        private static void SaveAssetToFile(string filename, byte[] data)
+        public class ScriptResourceSummary : ExpiringCapBase
         {
-            string assetPath = "UserAssets";
-            if (!Directory.Exists(assetPath))
+            private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+
+            private Scene m_scene;
+            private UUID m_agentID;
+            private int m_memory;
+            private int m_urls;
+            private IPAddress m_address;
+
+            public ScriptResourceSummary(Scene scene, UUID agentID, IHttpServer httpServer, string path, IPAddress address, 
+                int memory, int urls) : base(httpServer, path)
             {
-                Directory.CreateDirectory(assetPath);
+                m_address = address;
+                m_scene = scene;
+                m_agentID = agentID;
+                m_memory = memory;
+                m_urls  = urls;
+
+                Start(30000);
             }
-            FileStream fs = File.Create(Path.Combine(assetPath, Util.safeFileName(filename)));
-            BinaryWriter bw = new BinaryWriter(fs);
-            bw.Write(data);
-            bw.Close();
-            fs.Close();
+
+            /// <summary>
+            /// Handle raw asset upload data via the capability.
+            /// </summary>
+            /// <param name="data"></param>
+            /// <param name="path"></param>
+            /// <param name="param"></param>
+            /// <returns></returns>
+            public void ScriptResourceSummaryCap(IOSHttpRequest request, IOSHttpResponse response)
+            {
+                Stop();
+
+                if (!request.RemoteIPEndPoint.Address.Equals(m_address))
+                {
+                    response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                    return;
+                }
+
+                if (m_scene.ShuttingDown || !m_scene.TryGetScenePresence(m_agentID, out ScenePresence sp) || sp.IsChildAgent || sp.IsInTransit)
+                {
+                    response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                    return;
+                }
+
+                osUTF8 sb = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(sb);
+
+                LLSDxmlEncode2.AddMap("summary", sb);
+                LLSDxmlEncode2.AddArray("available", sb);
+
+                int maxurls = m_urls + 5000; // we don't limit this
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", maxurls, sb);
+                LLSDxmlEncode2.AddElem("type", "urls", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", (int)-1, sb);
+                LLSDxmlEncode2.AddElem("type", "memory", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddEndArray(sb); //available
+
+                LLSDxmlEncode2.AddArray("used", sb);
+
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", m_urls, sb);
+                LLSDxmlEncode2.AddElem("type", "urls", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("amount", m_memory, sb);
+                LLSDxmlEncode2.AddElem("type", "memory", sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+
+                LLSDxmlEncode2.AddEndArray(sb); //used
+
+                LLSDxmlEncode2.AddEndMap(sb); // summary
+                LLSDxmlEncode2.AddEndMap(sb);
+                response.RawBuffer = LLSDxmlEncode2.EndToNBBytes(sb);
+                response.StatusCode = (int)HttpStatusCode.OK;
+            }
+        }
+
+        public class ScriptResourceDetails : ExpiringCapBase
+        {
+            private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+
+            private Scene m_scene;
+            private UUID m_agentID;
+            private List<ParcelScriptInfo> m_parcelsInfo;
+            private IPAddress m_address;
+
+            public ScriptResourceDetails(Scene scene, UUID agentID, IHttpServer httpServer, string path, IPAddress address,
+                List<ParcelScriptInfo> parcelsInfo) :base(httpServer, path)
+            {
+                m_address = address;
+                m_scene = scene;
+                m_agentID = agentID;
+                m_parcelsInfo = parcelsInfo;
+
+                Start(30000);
+            }
+
+            /// <summary>
+            /// Handle raw asset upload data via the capability.
+            /// </summary>
+            /// <param name="data"></param>
+            /// <param name="path"></param>
+            /// <param name="param"></param>
+            /// <returns></returns>
+            public void ScriptResourceDetailsCap(IOSHttpRequest request, IOSHttpResponse response)
+            {
+                Stop();
+
+                if (!request.RemoteIPEndPoint.Address.Equals(m_address))
+                {
+                    response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                    return;
+                }
+
+                if (m_scene.ShuttingDown || !m_scene.TryGetScenePresence(m_agentID, out ScenePresence sp) || sp.IsChildAgent || sp.IsInTransit)
+                {
+                    response.StatusCode = (int)HttpStatusCode.Unauthorized;
+                    return;
+                }
+
+                osUTF8 sb = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(sb);
+
+                if (m_parcelsInfo.Count > 0)
+                {
+                    LLSDxmlEncode2.AddArray("parcels", sb);
+
+                    foreach (ParcelScriptInfo ps in m_parcelsInfo)
+                    {
+                        LLSDxmlEncode2.AddMap(sb);
+                        LLSDxmlEncode2.AddElem("name", ps.name, sb);
+                        LLSDxmlEncode2.AddElem("id", ps.id, sb);
+                        LLSDxmlEncode2.AddElem("local_id", ps.localID, sb);
+                        if(ps.objects.Count > 0)
+                        {
+                            LLSDxmlEncode2.AddArray("objects", sb);
+                            foreach (ScriptInfoForParcel sip in ps.objects)
+                            {
+                                LLSDxmlEncode2.AddMap(sb);
+                                LLSDxmlEncode2.AddElem("id", sip.id, sb);
+                                LLSDxmlEncode2.AddElem("is_group_owned", sip.groupOwned, sb);
+                                LLSDxmlEncode2.AddElem("location", sip.pos, sb);
+                                LLSDxmlEncode2.AddElem("name", sip.name, sb);
+                                LLSDxmlEncode2.AddElem("owner_id", sip.owner, sb);
+
+                                LLSDxmlEncode2.AddMap("resources", sb);
+                                    LLSDxmlEncode2.AddElem("memory", sip.memory, sb);
+                                    LLSDxmlEncode2.AddElem("urls", sip.urls, sb);
+                                LLSDxmlEncode2.AddEndMap(sb);
+
+                                LLSDxmlEncode2.AddEndMap(sb);
+                            }
+                            LLSDxmlEncode2.AddEndArray(sb);
+                        }
+                        else
+                            LLSDxmlEncode2.AddEmptyArray("objects", sb);
+
+                        LLSDxmlEncode2.AddEndMap(sb);
+                    }
+                    LLSDxmlEncode2.AddEndArray(sb); //parcels
+                }
+                else
+                    LLSDxmlEncode2.AddEmptyArray("parcels", sb);
+
+                LLSDxmlEncode2.AddEndMap(sb);
+                response.RawBuffer = LLSDxmlEncode2.EndToNBBytes(sb);
+                response.StatusCode = (int)HttpStatusCode.OK;
+            }
         }
     }
 }

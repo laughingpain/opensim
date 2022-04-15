@@ -85,8 +85,7 @@ namespace OpenSim.Framework
     public delegate void TeleportLocationRequest(
         IClientAPI remoteClient, ulong regionHandle, Vector3 position, Vector3 lookAt, uint flags);
 
-    public delegate void TeleportLandmarkRequest(
-        IClientAPI remoteClient, AssetLandmark lm);
+    public delegate void TeleportLandmarkRequest(IClientAPI remoteClient, AssetLandmark lm);
 
     public delegate void TeleportCancel(IClientAPI remoteClient);
 
@@ -316,7 +315,6 @@ namespace OpenSim.Framework
                                    bool removeContribution, int parcelLocalID, int parcelArea, int parcelPrice,
                                    bool authenticated);
 
-    // We keep all this information for fraud purposes in the future.
     public delegate void MoneyBalanceRequest(IClientAPI remoteClient, UUID agentID, UUID sessionID, UUID TransactionID);
 
     public delegate void ObjectPermissions(
@@ -356,8 +354,7 @@ namespace OpenSim.Framework
 
     public delegate void SetEstateTerrainDetailTexture(IClientAPI remoteClient, int corner, UUID side);
 
-    public delegate void SetEstateTerrainTextureHeights(IClientAPI remoteClient, int corner, float lowVal, float highVal
-        );
+    public delegate void SetEstateTerrainTextureHeights(IClientAPI remoteClient, int corner, float lowVal, float highVal);
 
     public delegate void CommitEstateTerrainTextureRequest(IClientAPI remoteClient);
 
@@ -584,58 +581,6 @@ namespace OpenSim.Framework
         public float dwell;
     }
 
-    public class EntityUpdate
-    {
-        private ISceneEntity m_entity;
-        private PrimUpdateFlags m_flags;
-
-        public ISceneEntity Entity
-        {
-            get { return m_entity; }
-        }
-
-        public PrimUpdateFlags Flags
-        {
-            get { return m_flags; }
-            set { m_flags = value; }
-        }
-
-        public virtual void Update()
-        {
-            // we are on the new one
-            if (m_flags.HasFlag(PrimUpdateFlags.CancelKill))
-            {
-                if (m_flags.HasFlag(PrimUpdateFlags.UpdateProbe))
-                    m_flags = PrimUpdateFlags.UpdateProbe;
-                else
-                    m_flags = PrimUpdateFlags.FullUpdatewithAnim;
-            }
-        }
-
-        public virtual void Update(EntityUpdate oldupdate)
-        {
-            // we are on the new one
-            PrimUpdateFlags updateFlags = oldupdate.Flags;
-            if (updateFlags.HasFlag(PrimUpdateFlags.UpdateProbe))
-                updateFlags &= ~PrimUpdateFlags.UpdateProbe;
-            if (m_flags.HasFlag(PrimUpdateFlags.CancelKill))
-            {
-                if(m_flags.HasFlag(PrimUpdateFlags.UpdateProbe))
-                    m_flags = PrimUpdateFlags.UpdateProbe;
-                else
-                    m_flags = PrimUpdateFlags.FullUpdatewithAnim;
-            }
-            else
-                m_flags |= updateFlags;
-        }
-
-        public EntityUpdate(ISceneEntity entity, PrimUpdateFlags flags)
-        {
-            m_entity = entity;
-            m_flags = flags;
-        }
-    }
-
     public class PlacesReplyData
     {
         public UUID OwnerID;
@@ -697,15 +642,6 @@ namespace OpenSim.Framework
         Kill =          0x80000000 // 1 << 31
     }
 
-/* included in .net 4.0
-    public static class PrimUpdateFlagsExtensions
-    {
-        public static bool HasFlag(this PrimUpdateFlags updateFlags, PrimUpdateFlags flag)
-        {
-            return (updateFlags & flag) == flag;
-        }
-    }
-*/
     public interface IClientAPI
     {
         Vector3 StartPos { get; set; }
@@ -821,6 +757,7 @@ namespace OpenSim.Framework
         event DeRezObject OnDeRezObject;
         event RezRestoreToWorld OnRezRestoreToWorld;
         event Action<IClientAPI> OnRegionHandShakeReply;
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1009:DeclareEventHandlersCorrectly")]
         event GenericCall1 OnRequestWearables;
         event Action<IClientAPI, bool> OnCompleteMovementToRegion;
 
@@ -1076,6 +1013,7 @@ namespace OpenSim.Framework
         /// Close this client
         /// </summary>
         void Close();
+        void Disconnect(string reason);
 
         /// <summary>
         /// Close this client
@@ -1149,7 +1087,6 @@ namespace OpenSim.Framework
         void SendLayerData(int[] map);
 
         void SendWindData(int version, Vector2[] windSpeeds);
-        void SendCloudData(int version, float[] cloudCover);
 
         /// <summary>
         /// Sent when an agent completes its movement into a region.
@@ -1220,6 +1157,7 @@ namespace OpenSim.Framework
         void SendInventoryItemCreateUpdate(InventoryItemBase Item, UUID transactionID, uint callbackId);
 
         void SendRemoveInventoryItem(UUID itemID);
+        void SendRemoveInventoryItems(UUID[] items);
 
         void SendTakeControls(int controls, bool passToAgent, bool TakeControls);
 
@@ -1235,7 +1173,8 @@ namespace OpenSim.Framework
         /// (including all descendent folders) as well as the folder itself.
         ///
         /// <param name="node"></param>
-        void SendBulkUpdateInventory(InventoryNodeBase node);
+        void SendBulkUpdateInventory(InventoryNodeBase node, UUID? transactionID = null);
+        void SendBulkUpdateInventory(InventoryFolderBase[] folders, InventoryItemBase[] items);
 
         void SendXferPacket(ulong xferID, uint packet,
                 byte[] XferData, int XferDataOffset, int XferDatapktLen, bool isTaskInventory);

@@ -619,7 +619,7 @@ namespace OpenSim.Tests.Common
 
         public byte[] GetThrottlesPacked(float multiplier)
         {
-            return new byte[0];
+            return Array.Empty<byte>();
         }
 
         public virtual void SendAnimations(UUID[] animations, int[] seqs, UUID sourceAgentId, UUID[] objectIDs)
@@ -665,8 +665,6 @@ namespace OpenSim.Tests.Common
         }
 
         public virtual void SendWindData(int version, Vector2[] windSpeeds) { }
-
-        public virtual void SendCloudData(int version, float[] cloudCover) { }
 
         public virtual void MoveAgentIntoRegion(RegionInfo regInfo, Vector3 pos, Vector3 look)
         {
@@ -787,21 +785,21 @@ namespace OpenSim.Tests.Common
         {
         }
 
-        public virtual void SendInventoryFolderDetails(UUID ownerID, UUID folderID,
-                                                       List<InventoryItemBase> items,
-                                                       List<InventoryFolderBase> folders,
-                                                       int version,
-                                                       int descendents,
-                                                       bool fetchFolders,
-                                                       bool fetchItems)
+        public void SendInventoryFolderDetails(UUID ownerID, UUID folderID,
+                                               List<InventoryItemBase> items,
+                                               List<InventoryFolderBase> folders,
+                                               int version,
+                                               int descendents,
+                                               bool fetchFolders,
+                                               bool fetchItems)
         {
         }
 
-        public virtual void SendInventoryItemDetails(InventoryItemBase[] items)
+        public void SendInventoryItemDetails(InventoryItemBase[] items)
         {
         }
 
-        public virtual void SendInventoryItemCreateUpdate(InventoryItemBase Item, uint callbackID)
+        public void SendInventoryItemCreateUpdate(InventoryItemBase Item, uint callbackID)
         {
         }
 
@@ -809,11 +807,19 @@ namespace OpenSim.Tests.Common
         {
         }
 
-        public virtual void SendRemoveInventoryItem(UUID itemID)
+        public void SendRemoveInventoryItem(UUID itemID)
         {
         }
 
-        public virtual void SendBulkUpdateInventory(InventoryNodeBase node)
+        public void SendRemoveInventoryItems(UUID[] items)
+        {
+        }
+
+        public void SendBulkUpdateInventory(InventoryNodeBase node, UUID? transactionID = null)
+        {
+        }
+
+        public void SendBulkUpdateInventory(InventoryFolderBase[] folders, InventoryItemBase[] items)
         {
         }
 

@@ -35,6 +35,8 @@ using LSL_Rotation = OpenSim.Region.ScriptEngine.Shared.LSL_Types.Quaternion;
 using LSL_String = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLString;
 using LSL_Vector = OpenSim.Region.ScriptEngine.Shared.LSL_Types.Vector3;
 
+#pragma warning disable IDE1006
+
 namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
 {
     public interface ILSL_Api
@@ -233,9 +235,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_String llIntegerToBase64(int number);
         LSL_String llKey2Name(LSL_Key id);
         LSL_String llGetUsername(LSL_Key id);
-           LSL_Key llRequestUsername(string id);
-        LSL_String llGetDisplayName(string id);
-           LSL_Key llRequestDisplayName(string id);
+           LSL_Key llRequestUsername(LSL_Key id);
+        LSL_String llGetDisplayName(LSL_Key id);
+           LSL_Key llRequestDisplayName(LSL_Key id);
               void llLinkParticleSystem(int linknum, LSL_List rules);
               void llLinkSitTarget(LSL_Integer link, LSL_Vector offset, LSL_Rotation rot);
         LSL_String llList2CSV(LSL_List src);
@@ -308,8 +310,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
               void llRemoveFromLandPassList(string avatar);
               void llRemoveInventory(string item);
               void llRemoveVehicleFlags(int flags);
+           LSL_Key llRequestUserKey(LSL_String username);
            LSL_Key llRequestAgentData(string id, int data);
-           LSL_Key llRequestInventoryData(string name);
+           LSL_Key llRequestInventoryData(LSL_String name);
               void llRequestPermissions(string agent, int perm);
            LSL_Key llRequestSecureURL();
            LSL_Key llRequestSimulatorData(string simulator, int data);
@@ -426,6 +429,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
        LSL_Integer llTarget(LSL_Vector position, double range);
               void llTargetOmega(LSL_Vector axis, double spinrate, double gain);
               void llTargetRemove(int number);
+              void llTargetedEmail(LSL_Integer target, LSL_String subject, LSL_String message);
               void llTeleportAgentHome(string agent);
               void llTeleportAgent(string agent, string simname, LSL_Vector pos, LSL_Vector lookAt);
               void llTeleportAgentGlobalCoords(string agent, LSL_Vector global, LSL_Vector pos, LSL_Vector lookAt);
@@ -443,6 +447,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
          LSL_Float llWater(LSL_Vector offset);
               void llWhisper(int channelID, string text);
         LSL_Vector llWind(LSL_Vector offset);
+        LSL_String llXorBase64(string str1, string str2);
         LSL_String llXorBase64Strings(string str1, string str2);
         LSL_String llXorBase64StringsCorrect(string str1, string str2);
        LSL_Integer llGetLinkNumberOfSides(LSL_Integer link);
@@ -474,5 +479,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api.Interfaces
         LSL_Rotation llGetRegionSunRotation();
         LSL_Rotation llGetMoonRotation();
         LSL_Rotation llGetRegionMoonRotation();
+
+         LSL_String llChar(LSL_Integer unicode);
+        LSL_Integer llOrd(LSL_String s, LSL_Integer index);
+        LSL_Integer llHash(LSL_String s);
     }
 }

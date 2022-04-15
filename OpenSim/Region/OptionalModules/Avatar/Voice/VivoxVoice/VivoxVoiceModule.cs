@@ -30,7 +30,6 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Xml;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
@@ -38,15 +37,13 @@ using OpenMetaverse;
 using log4net;
 using Mono.Addins;
 using Nini.Config;
-using Nwc.XmlRpc;
 using OpenSim.Framework;
 
-using OpenSim.Framework.Capabilities;
-using OpenSim.Framework.Servers;
 using OpenSim.Framework.Servers.HttpServer;
 using OpenSim.Region.Framework.Interfaces;
 using OpenSim.Region.Framework.Scenes;
 using Caps = OpenSim.Framework.Capabilities.Caps;
+using OpenMetaverse.StructuredData;
 
 namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
 {
@@ -593,22 +590,22 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
                 VivoxPassword(agentname, password);
 
                 // fast foward encode
-                StringBuilder lsl = LLSDxmlEncode.Start(512);
-                LLSDxmlEncode.AddMap(lsl);
-                LLSDxmlEncode.AddElem("username", agentname, lsl);
-                LLSDxmlEncode.AddElem("password", password, lsl);
-                LLSDxmlEncode.AddElem("voice_sip_uri_hostname", m_vivoxSipUri, lsl);
-                LLSDxmlEncode.AddElem("voice_account_server_name", m_vivoxVoiceAccountApi, lsl);
-                LLSDxmlEncode.AddEndMap(lsl);
+                osUTF8 lsl = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(lsl);
+                LLSDxmlEncode2.AddElem("username", agentname, lsl);
+                LLSDxmlEncode2.AddElem("password", password, lsl);
+                LLSDxmlEncode2.AddElem("voice_sip_uri_hostname", m_vivoxSipUri, lsl);
+                LLSDxmlEncode2.AddElem("voice_account_server_name", m_vivoxVoiceAccountApi, lsl);
+                LLSDxmlEncode2.AddEndMap(lsl);
 
-                response.RawBuffer = Util.UTF8.GetBytes(LLSDxmlEncode.End(lsl));
+                response.RawBuffer = LLSDxmlEncode2.EndToBytes(lsl);
                 return;
             }
             catch (Exception e)
             {
                 m_log.DebugFormat("[VivoxVoice][PROVISIONVOICE]: : {0} failed", e.ToString());
             }
-            response.RawBuffer = Util.UTF8.GetBytes("<llsd><undef /></llsd>");
+            response.RawBuffer = osUTF8.GetASCIIBytes("<llsd><undef /></llsd>");
         }
 
         /// <summary>
@@ -638,7 +635,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
                 return;
             }
 
-            string        avatarName = avatar.Name;
+            string avatarName = avatar.Name;
 
             // - check whether we have a region channel in our cache
             // - if not:
@@ -693,17 +690,17 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
                 // m_log.DebugFormat("[VivoxVoice][PARCELVOICE]: region \"{0}\": Parcel \"{1}\" ({2}): avatar \"{3}\": {4}",
                 //      scene.RegionInfo.RegionName, land.Name, land.LocalID, avatarName, r);
                 // fast foward encode
-                StringBuilder lsl = LLSDxmlEncode.Start(512);
-                LLSDxmlEncode.AddMap(lsl);
-                LLSDxmlEncode.AddElem("parcel_local_id", land.LocalID, lsl);
-                LLSDxmlEncode.AddElem("region_name", scene.Name, lsl);
-                LLSDxmlEncode.AddMap("voice_credentials",lsl);
-                LLSDxmlEncode.AddElem("channel_uri", channel_uri, lsl);
-                //LLSDxmlEncode.AddElem("channel_credentials", channel_credentials, lsl);
-                LLSDxmlEncode.AddEndMap(lsl);
-                LLSDxmlEncode.AddEndMap(lsl);
+                osUTF8 lsl = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(lsl);
+                LLSDxmlEncode2.AddElem("parcel_local_id", land.LocalID, lsl);
+                LLSDxmlEncode2.AddElem("region_name", scene.Name, lsl);
+                LLSDxmlEncode2.AddMap("voice_credentials",lsl);
+                LLSDxmlEncode2.AddElem("channel_uri", channel_uri, lsl);
+                //LLSDxmlEncode2.AddElem("channel_credentials", channel_credentials, lsl);
+                LLSDxmlEncode2.AddEndMap(lsl);
+                LLSDxmlEncode2.AddEndMap(lsl);
 
-                response.RawBuffer = Util.UTF8.GetBytes(LLSDxmlEncode.End(lsl));
+                response.RawBuffer = LLSDxmlEncode2.EndToBytes(lsl);
                 return;
             }
             catch (Exception e)
@@ -714,6 +711,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
             response.RawBuffer = Util.UTF8.GetBytes("<llsd><undef /></llsd>");
         }
 
+        /*
         /// <summary>
         /// Callback for a client request for a private chat channel
         /// </summary>
@@ -739,6 +737,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
             response.RawBuffer = Util.UTF8.GetBytes("<llsd>true</llsd>");
             response.StatusCode = (int)HttpStatusCode.OK;
         }
+        */
 
         private string RegionGetOrCreateChannel(Scene scene, LandData land)
         {
@@ -1186,7 +1185,10 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
                     using (HttpWebResponse rsp = (HttpWebResponse)req.GetResponse())
                     using (Stream s = rsp.GetResponseStream())
                     using (XmlTextReader rdr = new XmlTextReader(s))
-                            doc.Load(rdr);
+                    {
+                        rdr.DtdProcessing = DtdProcessing.Ignore;
+                        doc.Load(rdr);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -1301,7 +1303,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
         /// </summary>
         private bool XmlFind(XmlElement root, string tag, int nth, out string result)
         {
-            if (root == null || tag == null || tag == String.Empty)
+            if (root == null || string.IsNullOrEmpty(tag))
             {
                 result = String.Empty;
                 return false;
@@ -1312,7 +1314,7 @@ namespace OpenSim.Region.OptionalModules.Avatar.Voice.VivoxVoice
         private bool XmlFind(XmlElement root, string tag, out string result)
         {
             int nth = 0;
-            if (root == null || tag == null || tag == String.Empty)
+            if (root == null || string.IsNullOrEmpty(tag))
             {
                 result = String.Empty;
                 return false;

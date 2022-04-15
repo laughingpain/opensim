@@ -148,7 +148,7 @@ namespace OpenSim.Data.PGSQL
                             // this case, force the UUID to be the same as the group UUID so that at least these can be
                             // deleted (we need to change the UUID so that any other prims in the linkset can also be
                             // deleted).
-                            if (sceneObjectPart.UUID != groupID && groupID != UUID.Zero)
+                            if (!groupID.IsZero() && sceneObjectPart.UUID.NotEqual(groupID))
                             {
                                 _Log.WarnFormat(
                                     "[REGION DB]: Found root prim {0} {1} at {2} where group was actually {3}.  Forcing UUID to group UUID",
@@ -346,7 +346,7 @@ namespace OpenSim.Data.PGSQL
             ""SitTargetOrientZ"" = :SitTargetOrientZ, ""RegionUUID"" = :RegionUUID, ""CreatorID"" = :CreatorID, ""OwnerID"" = :OwnerID, ""GroupID"" = :GroupID,
             ""LastOwnerID"" = :LastOwnerID, ""SceneGroupID"" = :SceneGroupID, ""PayPrice"" = :PayPrice, ""PayButton1"" = :PayButton1, ""PayButton2"" = :PayButton2,
             ""PayButton3"" = :PayButton3, ""PayButton4"" = :PayButton4, ""LoopedSound"" = :LoopedSound, ""LoopedSoundGain"" = :LoopedSoundGain,
-            ""TextureAnimation"" = :TextureAnimation, ""OmegaX"" = :OmegaX, ""OmegaY"" = :OmegaY, ""OmegaZ"" = :OmegaZ, ""CameraEyeOffsetX"" = :CameraEyeOffsetX,
+            ""TextureAnimation"" = :TextureAnimation, ""CameraEyeOffsetX"" = :CameraEyeOffsetX,
             ""CameraEyeOffsetY"" = :CameraEyeOffsetY, ""CameraEyeOffsetZ"" = :CameraEyeOffsetZ, ""CameraAtOffsetX"" = :CameraAtOffsetX,
             ""CameraAtOffsetY"" = :CameraAtOffsetY, ""CameraAtOffsetZ"" = :CameraAtOffsetZ, ""ForceMouselook"" = :ForceMouselook,
             ""ScriptAccessPin"" = :ScriptAccessPin, ""AllowedDrop"" = :AllowedDrop, ""DieAtEdge"" = :DieAtEdge, ""SalePrice"" = :SalePrice,
@@ -366,8 +366,8 @@ namespace OpenSim.Data.PGSQL
             ""VelocityY"", ""VelocityZ"", ""AngularVelocityX"", ""AngularVelocityY"", ""AngularVelocityZ"", ""AccelerationX"", ""AccelerationY"", ""AccelerationZ"",
             ""RotationX"", ""RotationY"", ""RotationZ"", ""RotationW"", ""SitTargetOffsetX"", ""SitTargetOffsetY"", ""SitTargetOffsetZ"", ""SitTargetOrientW"",
             ""SitTargetOrientX"", ""SitTargetOrientY"", ""SitTargetOrientZ"", ""RegionUUID"", ""CreatorID"", ""OwnerID"", ""GroupID"", ""LastOwnerID"", ""SceneGroupID"",
-            ""PayPrice"", ""PayButton1"", ""PayButton2"", ""PayButton3"", ""PayButton4"", ""LoopedSound"", ""LoopedSoundGain"", ""TextureAnimation"", ""OmegaX"",
-            ""OmegaY"", ""OmegaZ"", ""CameraEyeOffsetX"", ""CameraEyeOffsetY"", ""CameraEyeOffsetZ"", ""CameraAtOffsetX"", ""CameraAtOffsetY"", ""CameraAtOffsetZ"",
+            ""PayPrice"", ""PayButton1"", ""PayButton2"", ""PayButton3"", ""PayButton4"", ""LoopedSound"", ""LoopedSoundGain"", ""TextureAnimation"",
+            ""CameraEyeOffsetX"", ""CameraEyeOffsetY"", ""CameraEyeOffsetZ"", ""CameraAtOffsetX"", ""CameraAtOffsetY"", ""CameraAtOffsetZ"",
             ""ForceMouselook"", ""ScriptAccessPin"", ""AllowedDrop"", ""DieAtEdge"", ""SalePrice"", ""SaleType"", ""ColorR"", ""ColorG"", ""ColorB"", ""ColorA"",
             ""ParticleSystem"", ""ClickAction"", ""Material"", ""CollisionSound"", ""CollisionSoundVolume"", ""PassTouches"", ""LinkNumber"", ""MediaURL"", ""DynAttrs"",
             ""PhysicsShapeType"", ""Density"", ""GravityModifier"", ""Friction"", ""Restitution"", ""PassCollisions"", ""RotationAxisLocks"", ""RezzerID"" , ""Vehicle"", ""PhysInertia"",
@@ -378,8 +378,8 @@ namespace OpenSim.Data.PGSQL
             :VelocityY, :VelocityZ, :AngularVelocityX, :AngularVelocityY, :AngularVelocityZ, :AccelerationX, :AccelerationY, :AccelerationZ,
             :RotationX, :RotationY, :RotationZ, :RotationW, :SitTargetOffsetX, :SitTargetOffsetY, :SitTargetOffsetZ, :SitTargetOrientW,
             :SitTargetOrientX, :SitTargetOrientY, :SitTargetOrientZ, :RegionUUID, :CreatorID, :OwnerID, :GroupID, :LastOwnerID, :SceneGroupID,
-            :PayPrice, :PayButton1, :PayButton2, :PayButton3, :PayButton4, :LoopedSound, :LoopedSoundGain, :TextureAnimation, :OmegaX,
-            :OmegaY, :OmegaZ, :CameraEyeOffsetX, :CameraEyeOffsetY, :CameraEyeOffsetZ, :CameraAtOffsetX, :CameraAtOffsetY, :CameraAtOffsetZ,
+            :PayPrice, :PayButton1, :PayButton2, :PayButton3, :PayButton4, :LoopedSound, :LoopedSoundGain, :TextureAnimation,
+            :CameraEyeOffsetX, :CameraEyeOffsetY, :CameraEyeOffsetZ, :CameraAtOffsetX, :CameraAtOffsetY, :CameraAtOffsetZ,
             :ForceMouselook, :ScriptAccessPin, :AllowedDrop, :DieAtEdge, :SalePrice, :SaleType, :ColorR, :ColorG, :ColorB, :ColorA,
             :ParticleSystem, :ClickAction, :Material, :CollisionSound, :CollisionSoundVolume, :PassTouches, :LinkNumber, :MediaURL, :DynAttrs,
             :PhysicsShapeType, :Density, :GravityModifier, :Friction, :Restitution, :PassCollisions, :RotationAxisLocks, :RezzerID, :Vehicle, :PhysInertia,
@@ -1314,20 +1314,15 @@ namespace OpenSim.Data.PGSQL
 
             prim.Sound = new UUID((Guid)primRow["LoopedSound"]);
             prim.SoundGain = Convert.ToSingle(primRow["LoopedSoundGain"]);
-            if (prim.Sound != UUID.Zero)
-                prim.SoundFlags = 1; // If it's persisted at all, it's looped
-            else
+            if (prim.Sound.IsZero())
                 prim.SoundFlags = 0;
+            else
+                prim.SoundFlags = 1; // If it's persisted at all, it's looped
 
             if (!(primRow["TextureAnimation"] is DBNull))
                 prim.TextureAnimation = (Byte[])primRow["TextureAnimation"];
             if (!(primRow["ParticleSystem"] is DBNull))
                 prim.ParticleSystem = (Byte[])primRow["ParticleSystem"];
-
-            prim.AngularVelocity = new Vector3(
-                                        Convert.ToSingle(primRow["OmegaX"]),
-                                        Convert.ToSingle(primRow["OmegaY"]),
-                                        Convert.ToSingle(primRow["OmegaZ"]));
 
             prim.SetCameraEyeOffset(new Vector3(
                                         Convert.ToSingle(primRow["CameraEyeOffsetX"]),
@@ -1781,10 +1776,6 @@ namespace OpenSim.Data.PGSQL
             parameters.Add(_Database.CreateParameter("TextureAnimation", prim.TextureAnimation));
             parameters.Add(_Database.CreateParameter("ParticleSystem", prim.ParticleSystem));
 
-            parameters.Add(_Database.CreateParameter("OmegaX", prim.AngularVelocity.X));
-            parameters.Add(_Database.CreateParameter("OmegaY", prim.AngularVelocity.Y));
-            parameters.Add(_Database.CreateParameter("OmegaZ", prim.AngularVelocity.Z));
-
             parameters.Add(_Database.CreateParameter("CameraEyeOffsetX", prim.GetCameraEyeOffset().X));
             parameters.Add(_Database.CreateParameter("CameraEyeOffsetY", prim.GetCameraEyeOffset().Y));
             parameters.Add(_Database.CreateParameter("CameraEyeOffsetZ", prim.GetCameraEyeOffset().Z));
@@ -1840,12 +1831,12 @@ namespace OpenSim.Data.PGSQL
             if (prim.VehicleParams != null)
                 parameters.Add(_Database.CreateParameter("Vehicle", prim.VehicleParams.ToXml2()));
             else
-                parameters.Add(_Database.CreateParameter("Vehicle", String.Empty));
+                parameters.Add(_Database.CreateParameter("Vehicle", string.Empty));
 
             if (prim.PhysicsInertia != null)
                 parameters.Add(_Database.CreateParameter("PhysInertia", prim.PhysicsInertia.ToXml2()));
             else
-                parameters.Add(_Database.CreateParameter("PhysInertia", String.Empty));
+                parameters.Add(_Database.CreateParameter("PhysInertia", string.Empty));
 
             if (prim.DynAttrs != null && prim.DynAttrs.CountNamespaces > 0)
                 parameters.Add(_Database.CreateParameter("DynAttrs", prim.DynAttrs.ToXml()));

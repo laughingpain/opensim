@@ -44,6 +44,7 @@ using System.Xml.Linq;
 using log4net;
 using Nwc.XmlRpc;
 using OpenMetaverse.StructuredData;
+using OpenSim.Framework;
 using OpenSim.Framework.ServiceAuth;
 
 namespace OpenSim.Framework
@@ -51,12 +52,13 @@ namespace OpenSim.Framework
     /// <summary>
     /// Miscellaneous static methods and extension methods related to the web
     /// </summary>
+    /// 
+
     public static class WebUtil
     {
-        private static readonly ILog m_log =
-                LogManager.GetLogger(
-                MethodBase.GetCurrentMethod().DeclaringType);
+        private static readonly ILog m_log = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
 
+        public static ExpiringKey<string> GlobalExpiringBadURLs = new ExpiringKey<string>(30000);
         /// <summary>
         /// Control the printing of certain debug messages.
         /// </summary>
@@ -112,12 +114,12 @@ namespace OpenSim.Framework
         /// </summary>
         public static OSDMap PutToServiceCompressed(string url, OSDMap data, int timeout)
         {
-            return ServiceOSDRequest(url,data, "PUT", timeout, true, false);
+            return ServiceOSDRequest(url, data, "PUT", timeout, true, false);
         }
 
         public static OSDMap PutToService(string url, OSDMap data, int timeout)
         {
-            return ServiceOSDRequest(url,data, "PUT", timeout, false, false);
+            return ServiceOSDRequest(url, data, "PUT", timeout, false, false);
         }
 
         public static OSDMap PostToService(string url, OSDMap data, int timeout, bool rpc)
@@ -198,28 +200,41 @@ namespace OpenSim.Framework
 
             string errorMessage = "unknown error";
             int tickstart = Util.EnvironmentTickCount();
-            int compsize = 0;
-            string strBuffer = null;
-
+            int sendlen = 0;
+            int rcvlen = 0;
+            HttpWebRequest request = null;
             try
             {
-                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+                request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = method;
                 request.Timeout = timeout;
                 request.KeepAlive = keepalive;
                 request.MaximumAutomaticRedirections = 10;
                 request.ReadWriteTimeout = timeout / 2;
                 request.Headers[OSHeaderRequestID] = reqnum.ToString();
+                request.AllowWriteStreamBuffering = false;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                m_log.Debug("[WEB UTIL]: SvcOSD error creating request " + ex.Message);
+                return ErrorResponseMap(errorMessage);
+            }
 
+            try
+            {
                 // If there is some input, write it into the request
                 if (data != null)
                 {
-                    strBuffer = OSDParser.SerializeJsonString(data);
-
+                    byte[] buffer;
                     if (DebugLevel >= 5)
-                        LogOutgoingDetail("SEND", reqnum, strBuffer);
-
-                    byte[] buffer = System.Text.Encoding.UTF8.GetBytes(strBuffer);
+                    {
+                        string strBuffer = OSDParser.SerializeJsonString(data);
+                        LogOutgoingDetail(method, reqnum, strBuffer);
+                        buffer = Util.UTF8Getbytes(strBuffer);
+                    }
+                    else
+                        buffer = OSDParser.SerializeJsonToBytes(data);
 
                     request.ContentType = rpc ? "application/json-rpc" : "application/json";
 
@@ -233,35 +248,26 @@ namespace OpenSim.Framework
                             {
                                 comp.Write(buffer, 0, buffer.Length);
                              }
-                            byte[] buf = ms.ToArray();
-
-                            request.ContentLength = buf.Length;   //Count bytes to send
-                            compsize = buf.Length;
-                            using (Stream requestStream = request.GetRequestStream())
-                                requestStream.Write(buf, 0, (int)buf.Length);
+                            buffer = ms.ToArray();
                         }
                     }
-                    else
-                    {
-                        compsize = buffer.Length;
 
-                        request.ContentLength = buffer.Length;   //Count bytes to send
-                        using (Stream requestStream = request.GetRequestStream())
-                            requestStream.Write(buffer, 0, buffer.Length);         //Send it
-                    }
+                    sendlen = buffer.Length;
+                    request.ContentLength = buffer.Length;   //Count bytes to send
+                    using (Stream requestStream = request.GetRequestStream())
+                        requestStream.Write(buffer, 0, buffer.Length);         //Send it
+                    buffer = null;
                 }
 
-                using (WebResponse response = request.GetResponse())
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                 {
-                    using (Stream responseStream = response.GetResponseStream())
+                    using (StreamReader reader = new StreamReader(response.GetResponseStream()))
                     {
-                        using (StreamReader reader = new StreamReader(responseStream))
-                        {
-                            string responseStr = reader.ReadToEnd();
-                            if (WebUtil.DebugLevel >= 5)
-                                WebUtil.LogResponseDetail(reqnum, responseStr);
-                            return CanonicalizeResults(responseStr);
-                        }
+                        string responseStr = reader.ReadToEnd();
+                        if (WebUtil.DebugLevel >= 5)
+                            WebUtil.LogResponseDetail(reqnum, responseStr);
+                        rcvlen = responseStr.Length;
+                        return CanonicalizeResults(responseStr);
                     }
                 }
             }
@@ -285,16 +291,8 @@ namespace OpenSim.Framework
                 if (tickdiff > LongCallTime)
                 {
                     m_log.InfoFormat(
-                        "[WEB UTIL]: Slow ServiceOSD request {0} {1} {2} took {3}ms, {4} bytes ({5} uncomp): {6}",
-                        reqnum,
-                        method,
-                        url,
-                        tickdiff,
-                        compsize,
-                        strBuffer != null ? strBuffer.Length : 0,
-                        strBuffer != null
-                            ? (strBuffer.Length > MaxRequestDiagLength ? strBuffer.Remove(MaxRequestDiagLength) : strBuffer)
-                            : "");
+                        "[WEB UTIL]: SvcOSD {0} {1} {2} took {3}ms, {4}/{5}bytes",
+                        reqnum, method, url, tickdiff, sendlen, rcvlen );
                 }
                 else if (DebugLevel >= 4)
                 {
@@ -303,8 +301,7 @@ namespace OpenSim.Framework
                 }
             }
 
-            m_log.DebugFormat(
-                "[LOGHTTP]: JSON-RPC request {0} {1} to {2} FAILED: {3}", reqnum, method, url, errorMessage);
+            m_log.DebugFormat("[LOGHTTP]: JSON request {0} {1} to {2} FAILED: {3}", reqnum, method, url, errorMessage);
 
             return ErrorResponseMap(errorMessage);
         }
@@ -327,10 +324,10 @@ namespace OpenSim.Framework
             result["_RawResult"] = OSD.FromString(response);
             result["_Result"] = new OSDMap();
 
-            if (response.Equals("true",System.StringComparison.OrdinalIgnoreCase))
+            if (response.Equals("true", StringComparison.OrdinalIgnoreCase))
                 return result;
 
-            if (response.Equals("false",System.StringComparison.OrdinalIgnoreCase))
+            if (response.Equals("false", StringComparison.OrdinalIgnoreCase))
             {
                 result["Success"] = OSD.FromBoolean(false);
                 result["success"] = OSD.FromBoolean(false);
@@ -379,52 +376,58 @@ namespace OpenSim.Framework
 
             string errorMessage = "unknown error";
             int tickstart = Util.EnvironmentTickCount();
-            int tickdata = 0;
-            string queryString = null;
+            int sendlen = 0;
+            int rcvlen = 0;
 
+            HttpWebRequest request = null;
             try
             {
-                HttpWebRequest request = (HttpWebRequest)HttpWebRequest.Create(url);
+                request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = "POST";
                 request.Timeout = timeout;
                 request.KeepAlive = false;
                 request.MaximumAutomaticRedirections = 10;
                 request.ReadWriteTimeout = timeout / 2;
                 request.Headers[OSHeaderRequestID] = reqnum.ToString();
+                request.AllowWriteStreamBuffering = false;
+            }
+            catch (Exception ex)
+            {
+                return ErrorResponseMap(ex.Message);
+            }
 
+            try
+            {
                 if (data != null)
                 {
-                    queryString = BuildQueryString(data);
+                    string queryString = BuildQueryString(data);
 
                     if (DebugLevel >= 5)
                         LogOutgoingDetail("SEND", reqnum, queryString);
 
                     byte[] buffer = System.Text.Encoding.UTF8.GetBytes(queryString);
+                    queryString = null;
 
                     request.ContentLength = buffer.Length;
+                    sendlen = buffer.Length;
                     request.ContentType = "application/x-www-form-urlencoded";
                     using (Stream requestStream = request.GetRequestStream())
                         requestStream.Write(buffer, 0, buffer.Length);
+                    buffer = null;
                 }
 
-                // capture how much time was spent writing, this may seem silly
-                // but with the number concurrent requests, this often blocks
-                tickdata = Util.EnvironmentTickCountSubtract(tickstart);
-
-                using (WebResponse response = request.GetResponse())
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
                 {
-                    using (Stream responseStream = response.GetResponseStream())
+                    using (StreamReader reader = new StreamReader(response.GetResponseStream()))
                     {
-                        using (StreamReader reader = new StreamReader(responseStream))
-                        {
-                            string responseStr = reader.ReadToEnd();
-                            if (WebUtil.DebugLevel >= 5)
-                                WebUtil.LogResponseDetail(reqnum, responseStr);
-                            OSD responseOSD = OSDParser.Deserialize(responseStr);
+                        string responseStr = reader.ReadToEnd();
+                        rcvlen = responseStr.Length;
+                        if (DebugLevel >= 5)
+                            LogResponseDetail(reqnum, responseStr);
+                        OSD responseOSD = OSDParser.Deserialize(responseStr);
 
-                            if (responseOSD.Type == OSDType.Map)
-                                return (OSDMap)responseOSD;
-                        }
+                        if (responseOSD.Type == OSDType.Map)
+                            return (OSDMap)responseOSD;
                     }
                 }
             }
@@ -447,16 +450,13 @@ namespace OpenSim.Framework
                 if (tickdiff > LongCallTime)
                 {
                     m_log.InfoFormat(
-                        "[LOGHTTP]: Slow ServiceForm request {0} '{1}' to {2} took {3}ms, {4}ms writing, {5}",
-                        reqnum, method, url, tickdiff, tickdata,
-                        queryString != null
-                            ? (queryString.Length > MaxRequestDiagLength) ? queryString.Remove(MaxRequestDiagLength) : queryString
-                            : "");
+                        "[LOGHTTP]: Slow ServiceForm request {0} '{1}' to {2} took {3}ms, {4}/{5}bytes",
+                        reqnum, method, url, tickdiff, sendlen, rcvlen);
                 }
                 else if (DebugLevel >= 4)
                 {
-                    m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms, {2}ms writing",
-                        reqnum, tickdiff, tickdata);
+                    m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms",
+                        reqnum, tickdiff);
                 }
             }
 
@@ -781,14 +781,15 @@ namespace OpenSim.Framework
 
             Type type = typeof(TRequest);
 
-            WebRequest request = WebRequest.Create(requestUrl);
-            HttpWebRequest ht = (HttpWebRequest)request;
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(requestUrl);
 
             if (auth != null)
-                auth.AddAuthorization(ht.Headers);
+                auth.AddAuthorization(request.Headers);
 
-            if (maxConnections > 0 && ht.ServicePoint.ConnectionLimit < maxConnections)
-                ht.ServicePoint.ConnectionLimit = maxConnections;
+            request.AllowWriteStreamBuffering = false;
+
+            if (maxConnections > 0 && request.ServicePoint.ConnectionLimit < maxConnections)
+                request.ServicePoint.ConnectionLimit = maxConnections;
 
             TResponse deserial = default(TResponse);
 
@@ -834,7 +835,7 @@ namespace OpenSim.Framework
                                 {
                                     using (Stream respStream = response.GetResponseStream())
                                     {
-                                        deserial = XMLResponseHelper.LogAndDeserialize<TRequest, TResponse>(
+                                        deserial = XMLResponseHelper.LogAndDeserialize<TResponse>(
                                             reqnum, respStream, response.ContentLength);
                                     }
                                 }
@@ -862,7 +863,7 @@ namespace OpenSim.Framework
                                 {
                                     using (Stream respStream = response.GetResponseStream())
                                     {
-                                        deserial = XMLResponseHelper.LogAndDeserialize<TRequest, TResponse>(
+                                        deserial = XMLResponseHelper.LogAndDeserialize<TResponse>(
                                             reqnum, respStream, response.ContentLength);
                                     }
                                 }
@@ -973,29 +974,34 @@ namespace OpenSim.Framework
                     reqnum, verb, requestUrl);
 
             int tickstart = Util.EnvironmentTickCount();
-            int tickdata = 0;
 
-            WebRequest request = WebRequest.Create(requestUrl);
-            request.Method = verb;
-            if (timeoutsecs > 0)
-                request.Timeout = timeoutsecs * 1000;
-            if(!keepalive && request is HttpWebRequest)
-                ((HttpWebRequest)request).KeepAlive = false;
-
-            if (auth != null)
-                auth.AddAuthorization(request.Headers);
-
-            string respstring = String.Empty;
-
-            int tickset = Util.EnvironmentTickCountSubtract(tickstart);
-
-            if ((verb == "POST") || (verb == "PUT"))
+            HttpWebRequest request = null;
+            try
             {
-                request.ContentType = "application/x-www-form-urlencoded";
+                request = (HttpWebRequest)WebRequest.Create(requestUrl);
+                request.Method = verb;
+                if (timeoutsecs > 0)
+                    request.Timeout = timeoutsecs * 1000;
+                if(!keepalive)
+                    request.KeepAlive = false;
+                if (auth != null)
+                    auth.AddAuthorization(request.Headers);
 
+                request.AllowWriteStreamBuffering = false;
+                request.ContentType = "application/x-www-form-urlencoded";
+            }
+            catch (Exception e)
+            {
+                m_log.InfoFormat("[FORMS]: Error creating {0} request to : {1}. Request: {2}", verb, requestUrl, e.Message);
+                throw e;
+            }
+
+            int sendlen = 0;
+            if (obj.Length > 0 && (verb == "POST") || (verb == "PUT"))
+            {
                 byte[] data = Util.UTF8NBGetbytes(obj);
-                int length = data.Length;
-                request.ContentLength = length;
+                sendlen = data.Length;
+                request.ContentLength = sendlen;
 
                 if (WebUtil.DebugLevel >= 5)
                     WebUtil.LogOutgoingDetail("SEND", reqnum, System.Text.Encoding.UTF8.GetString(data));
@@ -1003,62 +1009,49 @@ namespace OpenSim.Framework
                 try
                 {
                     using(Stream requestStream = request.GetRequestStream())
-                        requestStream.Write(data, 0, length);
+                        requestStream.Write(data, 0, sendlen);
+                    data = null;
                 }
                 catch (Exception e)
                 {
-                    m_log.InfoFormat("[FORMS]: Error sending request to {0}: {1}. Request: {2}", requestUrl, e.Message,
-                        obj.Length > WebUtil.MaxRequestDiagLength ? obj.Remove(WebUtil.MaxRequestDiagLength) : obj);
+                    m_log.InfoFormat("[FORMS]: Error sending {0} request to: {1}. {2}", verb,requestUrl, e.Message);
                     throw e;
-                }
-                finally
-                {
-                    // capture how much time was spent writing
-                    tickdata = Util.EnvironmentTickCountSubtract(tickstart);
-                    data = null;
                 }
             }
 
+            int rcvlen = 0;
+            string respstring = String.Empty;
             try
             {
                 using (WebResponse resp = request.GetResponse())
                 {
                     if (resp.ContentLength != 0)
                     {
-                        using (Stream respStream = resp.GetResponseStream())
-                            using (StreamReader reader = new StreamReader(respStream))
-                                respstring = reader.ReadToEnd();
+                        using (StreamReader reader = new StreamReader(resp.GetResponseStream()))
+                            respstring = reader.ReadToEnd();
+                        rcvlen = respstring.Length;
                     }
                 }
             }
             catch (Exception e)
             {
-                m_log.InfoFormat("[FORMS]: Error receiving response from {0}: {1}. Request: {2}", requestUrl, e.Message,
-                    obj.Length > WebUtil.MaxRequestDiagLength ? obj.Remove(WebUtil.MaxRequestDiagLength) : obj);
+                m_log.InfoFormat("[FORMS]: Error receiving response from {0}: {1}.", requestUrl, e.Message);
                 throw e;
             }
 
             int tickdiff = Util.EnvironmentTickCountSubtract(tickstart);
             if (tickdiff > WebUtil.LongCallTime)
             {
-                m_log.InfoFormat(
-                    "[FORMS]: Slow request {0} {1} {2} took {3}ms, {4}ms writing, {5}",
-                    reqnum,
-                    verb,
-                    requestUrl,
-                    tickdiff,
-                    tickset,
-                    tickdata,
-                    obj.Length > WebUtil.MaxRequestDiagLength ? obj.Remove(WebUtil.MaxRequestDiagLength) : obj);
+                m_log.InfoFormat("[FORMS]: request {0} {1} {2} took {3}ms, {4}/{5}bytes",
+                    reqnum, verb, requestUrl, tickdiff, sendlen, rcvlen);
             }
             else if (WebUtil.DebugLevel >= 4)
             {
-                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms, {2}ms writing",
-                    reqnum, tickdiff, tickdata);
+                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms",
+                    reqnum, tickdiff);
+                if (WebUtil.DebugLevel >= 5)
+                    WebUtil.LogResponseDetail(reqnum, respstring);
             }
-
-            if (WebUtil.DebugLevel >= 5)
-                WebUtil.LogResponseDetail(reqnum, respstring);
 
             return respstring;
         }
@@ -1080,23 +1073,30 @@ namespace OpenSim.Framework
 
             int tickstart = Util.EnvironmentTickCount();
 
-            WebRequest request = WebRequest.Create(requestUrl);
-            request.Method = "POST";
-            if (timeoutsecs > 0)
-                request.Timeout = timeoutsecs * 1000;
-            if (!keepalive && request is HttpWebRequest)
-                ((HttpWebRequest)request).KeepAlive = false;
+            HttpWebRequest request = null;
+            try
+            {
+                request = (HttpWebRequest)WebRequest.Create(requestUrl);
+                request.Method = "POST";
+                if (timeoutsecs > 0)
+                    request.Timeout = timeoutsecs * 1000;
+                if (!keepalive)
+                    request.KeepAlive = false;
+                if (auth != null)
+                    auth.AddAuthorization(request.Headers);
 
-            if (auth != null)
-                auth.AddAuthorization(request.Headers);
-
-            string respstring = String.Empty;
-
-            request.ContentType = "application/x-www-form-urlencoded";
+                request.AllowWriteStreamBuffering = false;
+                request.ContentType = "application/x-www-form-urlencoded";
+            }
+            catch (Exception e)
+            {
+                m_log.InfoFormat("[FORMS]: Error creating POST request to {0}: {1}", requestUrl, e.Message);
+                throw e;
+            }
 
             byte[] data = Util.UTF8NBGetbytes(obj);
-            int length = data.Length;
-            request.ContentLength = length;
+            int sendlen = data.Length;
+            request.ContentLength = sendlen;
 
             if (WebUtil.DebugLevel >= 5)
                 WebUtil.LogOutgoingDetail("SEND", reqnum, System.Text.Encoding.UTF8.GetString(data));
@@ -1104,53 +1104,47 @@ namespace OpenSim.Framework
             try
             {
                 using (Stream requestStream = request.GetRequestStream())
-                    requestStream.Write(data, 0, length);
+                    requestStream.Write(data, 0, sendlen);
                 data = null;
             }
             catch (Exception e)
             {
-                m_log.InfoFormat("[FORMS]: Error sending request to {0}: {1}. Request: {2}", requestUrl, e.Message,
-                    obj.Length > WebUtil.MaxRequestDiagLength ? obj.Remove(WebUtil.MaxRequestDiagLength) : obj);
+                m_log.InfoFormat("[FORMS]: Error sending POST request to {0}: {1}", requestUrl, e.Message);
                 throw e;
             }
 
+            string respstring = String.Empty;
+            int rcvlen = 0;
             try
             {
                 using (WebResponse resp = request.GetResponse())
                 {
                     if (resp.ContentLength != 0)
                     {
-                        using (Stream respStream = resp.GetResponseStream())
-                        using (StreamReader reader = new StreamReader(respStream))
+                        using (StreamReader reader = new StreamReader(resp.GetResponseStream()))
                             respstring = reader.ReadToEnd();
                     }
                 }
             }
             catch (Exception e)
             {
-                m_log.InfoFormat("[FORMS]: Error receiving response from {0}: {1}. Request: {2}", requestUrl, e.Message,
-                    obj.Length > WebUtil.MaxRequestDiagLength ? obj.Remove(WebUtil.MaxRequestDiagLength) : obj);
+                m_log.InfoFormat("[FORMS]: Error receiving response from {0}: {1}", requestUrl, e.Message);
                 throw e;
             }
 
             int tickdiff = Util.EnvironmentTickCountSubtract(tickstart);
             if (tickdiff > WebUtil.LongCallTime)
             {
-                m_log.InfoFormat(
-                    "[FORMS]: Slow request {0} POST {1} took {2}ms {3}",
-                    reqnum,
-                    requestUrl,
-                    tickdiff,
-                    obj.Length > WebUtil.MaxRequestDiagLength ? obj.Remove(WebUtil.MaxRequestDiagLength) : obj);
+                m_log.InfoFormat("[FORMS]: request {0} POST {1} took {2}ms {3}/{4}bytes",
+                    reqnum, requestUrl, tickdiff, sendlen, rcvlen);
             }
             else if (WebUtil.DebugLevel >= 4)
             {
                 m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms",
                     reqnum, tickdiff);
+                if (WebUtil.DebugLevel >= 5)
+                    WebUtil.LogResponseDetail(reqnum, respstring);
             }
-
-            if (WebUtil.DebugLevel >= 5)
-                WebUtil.LogResponseDetail(reqnum, respstring);
 
             return respstring;
         }
@@ -1171,7 +1165,7 @@ namespace OpenSim.Framework
         /// </returns>
         public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj)
         {
-            return MakeRequest<TRequest, TResponse>(verb, requestUrl, obj, 0);
+            return MakeRequest<TRequest, TResponse>(verb, requestUrl, obj, 0, null);
         }
 
         public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj, IServiceAuth auth)
@@ -1193,34 +1187,11 @@ namespace OpenSim.Framework
         /// </returns>
         public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj, int pTimeout)
         {
-            return MakeRequest<TRequest, TResponse>(verb, requestUrl, obj, pTimeout, 0);
-        }
-
-        public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj, int pTimeout, IServiceAuth auth)
-        {
-            return MakeRequest<TRequest, TResponse>(verb, requestUrl, obj, pTimeout, 0, auth);
-        }
-
-        /// Perform a synchronous REST request.
-        /// </summary>
-        /// <param name="verb"></param>
-        /// <param name="requestUrl"></param>
-        /// <param name="obj"></param>
-        /// <param name="pTimeout">
-        /// Request timeout in milliseconds.  Timeout.Infinite indicates no timeout.  If 0 is passed then the default HttpWebRequest timeout is used (100 seconds)
-        /// </param>
-        /// <param name="maxConnections"></param>
-        /// <returns>
-        /// The response.  If there was an internal exception or the request timed out,
-        /// then the default(TResponse) is returned.
-        /// </returns>
-        public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj, int pTimeout, int maxConnections)
-        {
-            return MakeRequest<TRequest, TResponse>(verb, requestUrl, obj, pTimeout, maxConnections, null);
+            return MakeRequest<TRequest, TResponse>(verb, requestUrl, obj, pTimeout, null);
         }
 
         /// <summary>
-        /// Perform a synchronous REST request.
+        /// Perform a synchronous something request.
         /// </summary>
         /// <param name="verb"></param>
         /// <param name="requestUrl"></param>
@@ -1228,39 +1199,41 @@ namespace OpenSim.Framework
         /// <param name="pTimeout">
         /// Request timeout in milliseconds.  Timeout.Infinite indicates no timeout.  If 0 is passed then the default HttpWebRequest timeout is used (100 seconds)
         /// </param>
-        /// <param name="maxConnections"></param>
         /// <returns>
         /// The response.  If there was an internal exception or the request timed out,
         /// then the default(TResponse) is returned.
         /// </returns>
-        public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj, int pTimeout, int maxConnections, IServiceAuth auth)
+        public static TResponse MakeRequest<TRequest, TResponse>(string verb, string requestUrl, TRequest obj, int pTimeout, IServiceAuth auth)
         {
             int reqnum = WebUtil.RequestNumber++;
 
             if (WebUtil.DebugLevel >= 3)
-                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} SynchronousRestObject {1} to {2}",
+                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} SRestObjReq {1} {2}",
                     reqnum, verb, requestUrl);
 
             int tickstart = Util.EnvironmentTickCount();
-            int tickdata = 0;
 
-            Type type = typeof(TRequest);
             TResponse deserial = default(TResponse);
 
-            WebRequest request = WebRequest.Create(requestUrl);
-            HttpWebRequest ht = (HttpWebRequest)request;
+            HttpWebRequest request = null;
+            try
+            {
+                request = (HttpWebRequest)WebRequest.Create(requestUrl);
 
-            if (auth != null)
-                auth.AddAuthorization(ht.Headers);
+                if (auth != null)
+                    auth.AddAuthorization(request.Headers);
 
-            if (pTimeout != 0)
-                request.Timeout = pTimeout;
+                if (pTimeout != 0)
+                    request.Timeout = pTimeout;
 
-            if (maxConnections > 0 && ht.ServicePoint.ConnectionLimit < maxConnections)
-                ht.ServicePoint.ConnectionLimit = maxConnections;
-
-            request.Method = verb;
-            MemoryStream buffer = null;
+                request.Method = verb;
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[SRestObjReq]: Exception in creating request {0} {1}: {2}{3}",
+                    verb, requestUrl, e.Message, e.StackTrace);
+                return deserial;
+            }
 
             try
             {
@@ -1269,141 +1242,211 @@ namespace OpenSim.Framework
                     request.ContentType = "text/xml";
 
                     byte[] data;
-                    XmlWriterSettings settings = new XmlWriterSettings(){Encoding = Util.UTF8};
+                    XmlWriterSettings settings = new XmlWriterSettings() { Encoding = Util.UTF8 };
                     using (MemoryStream ms = new MemoryStream())
                     using (XmlWriter writer = XmlWriter.Create(ms, settings))
                     {
-                        XmlSerializer serializer = new XmlSerializer(type);
+                        XmlSerializer serializer = new XmlSerializer(typeof(TRequest));
                         serializer.Serialize(writer, obj);
                         writer.Flush();
                         data = ms.ToArray();
                     }
 
-                    int length = data.Length;
-                    request.ContentLength = length;
+                    int sendlen = data.Length;
+                    request.ContentLength = sendlen;
 
                     if (WebUtil.DebugLevel >= 5)
                         WebUtil.LogOutgoingDetail("SEND", reqnum, System.Text.Encoding.UTF8.GetString(data));
 
-                    try
-                    {
-                        using (Stream requestStream = request.GetRequestStream())
-                            requestStream.Write(data, 0, length);
-                    }
-                    catch (Exception e)
-                    {
-                        m_log.DebugFormat(
-                            "[SynchronousRestObjectRequester]: Exception in making request {0} {1}: {2}{3}",
-                            verb, requestUrl, e.Message, e.StackTrace);
-
-                        return deserial;
-                    }
-                    finally
-                    {
-                        // capture how much time was spent writing
-                        tickdata = Util.EnvironmentTickCountSubtract(tickstart);
-                    }
-                }
-
-                try
-                {
-                    using (HttpWebResponse resp = (HttpWebResponse)request.GetResponse())
-                    {
-                        if (resp.ContentLength != 0)
-                        {
-                            using (Stream respStream = resp.GetResponseStream())
-                            {
-                                deserial = XMLResponseHelper.LogAndDeserialize<TRequest, TResponse>(
-                                    reqnum, respStream, resp.ContentLength);
-                            }
-                        }
-                        else
-                        {
-                            m_log.DebugFormat(
-                                "[SynchronousRestObjectRequester]: Oops! no content found in response stream from {0} {1}",
-                                verb, requestUrl);
-                        }
-                    }
-                }
-                catch (WebException e)
-                {
-                    using (HttpWebResponse hwr = (HttpWebResponse)e.Response)
-                    {
-                        if (hwr != null)
-                        {
-                            if (hwr.StatusCode == HttpStatusCode.NotFound)
-                                return deserial;
-
-                            if (hwr.StatusCode == HttpStatusCode.Unauthorized)
-                            {
-                                m_log.ErrorFormat("[SynchronousRestObjectRequester]: Web request {0} requires authentication",
-                                    requestUrl);
-                            }
-                            else
-                            {
-                                m_log.WarnFormat("[SynchronousRestObjectRequester]: Web request {0} returned error: {1}",
-                                    requestUrl, hwr.StatusCode);
-                            }
-                        }
-                        else
-                            m_log.ErrorFormat(
-                                "[SynchronousRestObjectRequester]: WebException for {0} {1} {2} {3}",
-                                verb, requestUrl, typeof(TResponse).ToString(), e.Message);
-
-                       return deserial;
-                    }
-                }
-                catch (System.InvalidOperationException)
-                {
-                    // This is what happens when there is invalid XML
-                    m_log.DebugFormat(
-                        "[SynchronousRestObjectRequester]: Invalid XML from {0} {1} {2}",
-                        verb, requestUrl, typeof(TResponse).ToString());
-                }
-                catch (Exception e)
-                {
-                    m_log.Debug(string.Format(
-                        "[SynchronousRestObjectRequester]: Exception on response from {0} {1} ",
-                        verb, requestUrl), e);
-                }
-
-                int tickdiff = Util.EnvironmentTickCountSubtract(tickstart);
-                if (tickdiff > WebUtil.LongCallTime)
-                {
-                    string originalRequest = null;
-
-                    if (buffer != null)
-                    {
-                        originalRequest = Encoding.UTF8.GetString(buffer.ToArray());
-
-                        if (originalRequest.Length > WebUtil.MaxRequestDiagLength)
-                            originalRequest = originalRequest.Remove(WebUtil.MaxRequestDiagLength);
-                    }
-
-                    m_log.InfoFormat(
-                        "[LOGHTTP]: Slow SynchronousRestObject request {0} {1} to {2} took {3}ms, {4}ms writing, {5}",
-                        reqnum, verb, requestUrl, tickdiff, tickdata,
-                        originalRequest);
-                }
-                else if (WebUtil.DebugLevel >= 4)
-                {
-                    m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms, {2}ms writing",
-                        reqnum, tickdiff, tickdata);
+                    using (Stream requestStream = request.GetRequestStream())
+                        requestStream.Write(data, 0, sendlen);
+                    data = null;
                 }
             }
-            finally
+            catch (Exception e)
             {
-                if (buffer != null)
-                    buffer.Dispose();
+                m_log.DebugFormat(
+                    "[SRestObjReq]: Exception in making request {0} {1}: {2}{3}",
+                    verb, requestUrl, e.Message, e.StackTrace);
+
+                return deserial;
             }
 
+            int rcvlen = 0;
+            try
+            {
+                using (HttpWebResponse resp = (HttpWebResponse)request.GetResponse())
+                {
+                    if (resp.ContentLength != 0)
+                    {
+                        rcvlen = (int)resp.ContentLength;
+                        using (Stream respStream = resp.GetResponseStream())
+                        {
+                            deserial = XMLResponseHelper.LogAndDeserialize<TResponse>(
+                                reqnum, respStream, resp.ContentLength);
+                        }
+                    }
+                    else
+                    {
+                        m_log.DebugFormat("[SRestObjReq]: Oops! no content found in response stream from {0} {1}",
+                            verb, requestUrl);
+                    }
+                }
+            }
+            catch (WebException e)
+            {
+                using (HttpWebResponse hwr = (HttpWebResponse)e.Response)
+                {
+                    if (hwr != null)
+                    {
+                        if (hwr.StatusCode == HttpStatusCode.Unauthorized)
+                        {
+                            m_log.ErrorFormat("[SRestObjReq]: {0} requires authentication",
+                                requestUrl);
+                        }
+                        else if (hwr.StatusCode != HttpStatusCode.NotFound)
+                        {
+                            m_log.WarnFormat("[SRestObjReq]: {0} returned error: {1}",
+                                requestUrl, hwr.StatusCode);
+                        }
+                    }
+                    else
+                        m_log.ErrorFormat(
+                            "[SRestObjReq]: WebException for {0} {1} {2} {3}",
+                            verb, requestUrl, typeof(TResponse).ToString(), e.Message);
+                }
+            }
+            catch (System.InvalidOperationException)
+            {
+                // This is what happens when there is invalid XML
+                m_log.DebugFormat("[SRestObjReq]: Invalid XML from {0} {1} {2}",
+                    verb, requestUrl, typeof(TResponse).ToString());
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[SRestObjReq]: Exception on response from {0} {1}: {2}",
+                    verb, requestUrl, e.Message);
+            }
+
+            int tickdiff = Util.EnvironmentTickCountSubtract(tickstart);
+            if (tickdiff > WebUtil.LongCallTime)
+            {
+                m_log.InfoFormat("[LOGHTTP]: Slow SRestObjReq {0} {1} {2} took {3}ms, {4}bytes",
+                    reqnum, verb, requestUrl, tickdiff, rcvlen);
+            }
+            else if (WebUtil.DebugLevel >= 4)
+            {
+                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms",
+                    reqnum, tickdiff);
+            }
+            return deserial;
+        }
+
+        public static TResponse MakeGetRequest<TResponse>(string requestUrl, int pTimeout, IServiceAuth auth)
+        {
+            int reqnum = WebUtil.RequestNumber++;
+
+            if (WebUtil.DebugLevel >= 3)
+                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} SRestObjReq GET {2}", reqnum, requestUrl);
+            int tickstart = Util.EnvironmentTickCount();
+
+            TResponse deserial = default(TResponse);
+            HttpWebRequest request = null;
+            try
+            {
+                request = (HttpWebRequest)WebRequest.Create(requestUrl);
+
+                if (auth != null)
+                    auth.AddAuthorization(request.Headers);
+
+                request.AllowWriteStreamBuffering = false;
+
+                if (pTimeout != 0)
+                    request.Timeout = pTimeout;
+
+                request.Method = "GET";
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[SRestObjReq]: Exception in creating GET request  {0}: {1}{2}",
+                    requestUrl, e.Message, e.StackTrace);
+                return deserial;
+            }
+
+            int rcvlen = 0;
+            try
+            {
+                using (HttpWebResponse resp = (HttpWebResponse)request.GetResponse())
+                {
+                    if (resp.ContentLength != 0)
+                    {
+                        rcvlen = (int)resp.ContentLength;
+                        using (Stream respStream = resp.GetResponseStream())
+                        {
+                            deserial = XMLResponseHelper.LogAndDeserialize<TResponse>(
+                                reqnum, respStream, resp.ContentLength);
+                        }
+                    }
+                    else
+                    {
+                        m_log.DebugFormat("[SRestObjReq]: Oops! no content found in response stream from GET {0}",
+                            requestUrl);
+                    }
+                }
+            }
+            catch (WebException e)
+            {
+                using (HttpWebResponse hwr = (HttpWebResponse)e.Response)
+                {
+                    if (hwr != null)
+                    {
+                        if (hwr.StatusCode == HttpStatusCode.Unauthorized)
+                        {
+                            m_log.ErrorFormat("[SRestObjReq]:  GET {0} requires authentication",
+                                requestUrl);
+                        }
+                        else if (hwr.StatusCode != HttpStatusCode.NotFound)
+                        {
+                            m_log.WarnFormat("[SRestObjReq]: GET {0} returned error: {1}",
+                                requestUrl, hwr.StatusCode);
+                        }
+                    }
+                    else
+                        m_log.ErrorFormat(
+                            "[SRestObjReq]: WebException for GET {0} {1} {2}",
+                            requestUrl, typeof(TResponse).ToString(), e.Message);
+                }
+            }
+            catch (System.InvalidOperationException)
+            {
+                // This is what happens when there is invalid XML
+                m_log.DebugFormat("[SRestObjReq]: Invalid XML from GET {0} {1}",
+                    requestUrl, typeof(TResponse).ToString());
+            }
+            catch (Exception e)
+            {
+                m_log.DebugFormat("[SRestObjReq]: Exception on response from GET {0}: {1}",
+                    requestUrl, e.Message);
+            }
+
+            int tickdiff = Util.EnvironmentTickCountSubtract(tickstart);
+            if (tickdiff > WebUtil.LongCallTime)
+            {
+                m_log.InfoFormat("[LOGHTTP]: Slow SRestObjReq  GET {0} {1} took {2}ms, {3}bytes",
+                    reqnum, requestUrl, tickdiff, rcvlen);
+            }
+            else if (WebUtil.DebugLevel >= 4)
+            {
+                m_log.DebugFormat("[LOGHTTP]: HTTP OUT {0} took {1}ms",
+                    reqnum, tickdiff);
+            }
             return deserial;
         }
     }
 
     public static class XMLResponseHelper
     {
-        public static TResponse LogAndDeserialize<TRequest, TResponse>(int reqnum, Stream respStream, long contentLength)
+        public static TResponse LogAndDeserialize<TResponse>(int reqnum, Stream respStream, long contentLength)
         {
             XmlSerializer deserializer = new XmlSerializer(typeof(TResponse));
             if (WebUtil.DebugLevel >= 5)

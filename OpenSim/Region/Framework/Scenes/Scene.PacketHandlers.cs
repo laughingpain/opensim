@@ -224,7 +224,7 @@ namespace OpenSim.Region.Framework.Scenes
 
             // XXX: Might be better to get rid of this special casing and have GetMembershipData return something
             // reasonable for a UUID.Zero group.
-            if (groupID != UUID.Zero)
+            if (!groupID.IsZero())
             {
                 GroupMembershipData gmd = m_groupsModule.GetMembershipData(groupID, remoteClient.AgentId);
 
@@ -314,16 +314,22 @@ namespace OpenSim.Region.Framework.Scenes
             // the client handles rez correctly
             obj.ObjectGrabHandler(localID, offsetPos, remoteClient);
 
+            uint partLocalId = part.LocalId;
             // If the touched prim handles touches, deliver it
             if ((part.ScriptEvents & scriptEvents.touch_start) != 0)
-                EventManager.TriggerObjectGrab(part.LocalId, 0, offsetPos, remoteClient, surfaceArg);
+            {
+                EventManager.TriggerObjectGrab(partLocalId, 0, offsetPos, remoteClient, surfaceArg);
+                if(!part.PassTouches)
+                    return;
+            }
 
             // Deliver to the root prim if the touched prim doesn't handle touches
             // or if we're meant to pass on touches anyway.
-            if (((part.ScriptEvents & scriptEvents.touch_start) == 0) ||
-                (part.PassTouches && (part.LocalId != obj.RootPart.LocalId)))
+
+            uint rootLocalId = obj.RootPart.LocalId;
+            if (partLocalId != rootLocalId &&  (obj.RootPart.ScriptEvents & scriptEvents.touch_start) != 0)
             {
-                EventManager.TriggerObjectGrab(obj.RootPart.LocalId, part.LocalId, offsetPos, remoteClient, surfaceArg);
+                EventManager.TriggerObjectGrab(rootLocalId, partLocalId, offsetPos, remoteClient, surfaceArg);
             }
         }
 
@@ -355,14 +361,21 @@ namespace OpenSim.Region.Framework.Scenes
 
             Vector3 grabOffset = pos - part.AbsolutePosition;
             // If the touched prim handles touches, deliver it
+            uint partLocalId = part.LocalId;
             if ((part.ScriptEvents & scriptEvents.touch) != 0)
-                EventManager.TriggerObjectGrabbing(part.LocalId, 0, grabOffset, remoteClient, surfaceArg);
+            {
+                EventManager.TriggerObjectGrabbing(partLocalId, 0, grabOffset, remoteClient, surfaceArg);
+                if(!part.PassTouches)
+                    return;
+            }
 
+            uint rootLocalId = group.RootPart.LocalId;
             // Deliver to the root prim if the touched prim doesn't handle touches
             // or if we're meant to pass on touches anyway.
-            if (((part.ScriptEvents & scriptEvents.touch) == 0) ||
-                (part.PassTouches && (part.LocalId != group.RootPart.LocalId)))
-                EventManager.TriggerObjectGrabbing(group.RootPart.LocalId, part.LocalId, grabOffset, remoteClient, surfaceArg);
+            if (partLocalId != rootLocalId && (group.RootPart.ScriptEvents & scriptEvents.touch) != 0)
+            {
+                EventManager.TriggerObjectGrabbing(rootLocalId, partLocalId, grabOffset, remoteClient, surfaceArg);
+            }
         }
 
         public virtual void ProcessObjectDeGrab(uint localID, IClientAPI remoteClient, List<SurfaceTouchEventArgs> surfaceArgs)
@@ -377,14 +390,19 @@ namespace OpenSim.Region.Framework.Scenes
             if (surfaceArgs != null && surfaceArgs.Count > 0)
                 surfaceArg = surfaceArgs[0];
 
+            uint partLocalId = part.LocalId;
             // If the touched prim handles touches, deliver it
             if ((part.ScriptEvents & scriptEvents.touch_end) != 0)
-                EventManager.TriggerObjectDeGrab(part.LocalId, 0, remoteClient, surfaceArg);
-            // if not or PassTouchs, send it also to root.
-            if (((part.ScriptEvents & scriptEvents.touch_end) == 0) ||
-                (part.PassTouches && (part.LocalId != grp.RootPart.LocalId)))
             {
-                EventManager.TriggerObjectDeGrab(grp.RootPart.LocalId, part.LocalId, remoteClient, surfaceArg);
+                EventManager.TriggerObjectDeGrab(partLocalId, 0, remoteClient, surfaceArg);
+                if(!part.PassTouches)
+                    return;
+            }
+
+            uint rootPartLocalId = grp.RootPart.LocalId;
+            if (partLocalId != rootPartLocalId && (grp.RootPart.ScriptEvents & scriptEvents.touch_end) != 0)
+            {
+                EventManager.TriggerObjectDeGrab(rootPartLocalId, partLocalId, remoteClient, surfaceArg);
             }
         }
 
@@ -530,7 +548,7 @@ namespace OpenSim.Region.Framework.Scenes
 //                "[USER INVENTORY]: HandleFetchInventoryDescendents() for {0}, folder={1}, fetchFolders={2}, fetchItems={3}, sortOrder={4}",
 //                remoteClient.Name, folderID, fetchFolders, fetchItems, sortOrder);
 
-            if (folderID == UUID.Zero)
+            if (folderID.IsZero())
                 return;
 
             // FIXME MAYBE: We're not handling sortOrder!
@@ -619,10 +637,6 @@ namespace OpenSim.Region.Framework.Scenes
         /// Handle a client request to update the inventory folder
         /// </summary>
         ///
-        /// FIXME: We call add new inventory folder because in the data layer, we happen to use an SQL REPLACE
-        /// so this will work to rename an existing folder.  Needless to say, to rely on this is very confusing,
-        /// and needs to be changed.
-        ///
         /// <param name="remoteClient"></param>
         /// <param name="folderID"></param>
         /// <param name="type"></param>
@@ -666,8 +680,6 @@ namespace OpenSim.Region.Framework.Scenes
             }
         }
 
-        delegate void PurgeFolderDelegate(UUID userID, UUID folder);
-
         /// <summary>
         /// This should delete all the items and folders in the given directory.
         /// </summary>
@@ -675,10 +687,14 @@ namespace OpenSim.Region.Framework.Scenes
         /// <param name="folderID"></param>
         public void HandlePurgeInventoryDescendents(IClientAPI remoteClient, UUID folderID)
         {
-            PurgeFolderDelegate d = PurgeFolderAsync;
             try
             {
-                d.BeginInvoke(remoteClient.AgentId, folderID, PurgeFolderCompleted, d);
+                UUID agent = remoteClient.AgentId;
+                UUID folder = folderID;
+                Util.FireAndForget(delegate
+                {
+                    PurgeFolderAsync(agent, folder);
+                });
             }
             catch (Exception e)
             {
@@ -701,12 +717,6 @@ namespace OpenSim.Region.Framework.Scenes
             {
                 m_log.WarnFormat("[AGENT INVENTORY]: Exception on async purge folder for user {0}: {1}", userID, e.Message);
             }
-        }
-
-        private void PurgeFolderCompleted(IAsyncResult iar)
-        {
-            PurgeFolderDelegate d = (PurgeFolderDelegate)iar.AsyncState;
-            d.EndInvoke(iar);
         }
     }
 }

@@ -597,9 +597,8 @@ namespace OpenSim.Data.SQLite
                     // Remove prim row
                     row.Delete();
                 }
+                Commit();
             }
-
-            Commit();
         }
 
         /// <summary>
@@ -947,8 +946,8 @@ namespace OpenSim.Data.SQLite
                 {
                     rowsToDelete[iter].Delete();
                 }
+                Commit();
             }
-            Commit();
         }
 
         /// <summary>
@@ -1000,9 +999,8 @@ namespace OpenSim.Data.SQLite
                     fillLandAccessRow(newAccessRow, entry, parcel.LandData.GlobalID);
                     landaccesslist.Rows.Add(newAccessRow);
                 }
+                Commit();
             }
-
-            Commit();
         }
 
         /// <summary>
@@ -1041,7 +1039,7 @@ namespace OpenSim.Data.SQLite
         public void Commit()
         {
 //            m_log.Debug("[SQLITE]: Starting commit");
-            lock (ds)
+            //lock (ds) caller must lock
             {
                 primDa.Update(ds, "prims");
                 shapeDa.Update(ds, "primshapes");
@@ -1071,7 +1069,8 @@ namespace OpenSim.Data.SQLite
         /// </summary>
         public void Shutdown()
         {
-            Commit();
+            lock(ds)
+                Commit();
         }
 
         /***********************************************************************
@@ -1194,10 +1193,6 @@ namespace OpenSim.Data.SQLite
             createCol(prims, "LoopedSoundGain", typeof(Double));
             createCol(prims, "TextureAnimation", typeof(String));
             createCol(prims, "ParticleSystem", typeof(String));
-
-            createCol(prims, "OmegaX", typeof(Double));
-            createCol(prims, "OmegaY", typeof(Double));
-            createCol(prims, "OmegaZ", typeof(Double));
 
             createCol(prims, "CameraEyeOffsetX", typeof(Double));
             createCol(prims, "CameraEyeOffsetY", typeof(Double));
@@ -1697,21 +1692,15 @@ namespace OpenSim.Data.SQLite
 
             prim.Sound = new UUID(row["LoopedSound"].ToString());
             prim.SoundGain = Convert.ToSingle(row["LoopedSoundGain"]);
-            if (prim.Sound != UUID.Zero)
-                prim.SoundFlags = 1; // If it's persisted at all, it's looped
-            else
+            if (prim.Sound.IsZero())
                 prim.SoundFlags = 0;
+            else
+                prim.SoundFlags = 1; // If it's persisted at all, it's looped
 
             if (!row.IsNull("TextureAnimation"))
                 prim.TextureAnimation = Convert.FromBase64String(row["TextureAnimation"].ToString());
             if (!row.IsNull("ParticleSystem"))
                 prim.ParticleSystem = Convert.FromBase64String(row["ParticleSystem"].ToString());
-
-            prim.AngularVelocity = new Vector3(
-                Convert.ToSingle(row["OmegaX"]),
-                Convert.ToSingle(row["OmegaY"]),
-                Convert.ToSingle(row["OmegaZ"])
-                );
 
             prim.SetCameraEyeOffset(new Vector3(
                 Convert.ToSingle(row["CameraEyeOffsetX"]),
@@ -2110,10 +2099,6 @@ namespace OpenSim.Data.SQLite
             row["TextureAnimation"] = Convert.ToBase64String(prim.TextureAnimation);
             row["ParticleSystem"] = Convert.ToBase64String(prim.ParticleSystem);
 
-            row["OmegaX"] = prim.AngularVelocity.X;
-            row["OmegaY"] = prim.AngularVelocity.Y;
-            row["OmegaZ"] = prim.AngularVelocity.Z;
-
             row["CameraEyeOffsetX"] = prim.GetCameraEyeOffset().X;
             row["CameraEyeOffsetY"] = prim.GetCameraEyeOffset().Y;
             row["CameraEyeOffsetZ"] = prim.GetCameraEyeOffset().Z;
@@ -2185,7 +2170,7 @@ namespace OpenSim.Data.SQLite
             if (prim.KeyframeMotion != null)
                 row["KeyframeMotion"] = prim.KeyframeMotion.Serialize();
             else
-                row["KeyframeMotion"] = new Byte[0];
+                row["KeyframeMotion"] = Array.Empty<byte>(); ;
 
             row["PassTouches"] = prim.PassTouches;
             row["PassCollisions"] = prim.PassCollisions;
@@ -2524,9 +2509,8 @@ namespace OpenSim.Data.SQLite
                     fillItemRow(newItemRow, newItem);
                     dbItems.Rows.Add(newItemRow);
                 }
+                Commit();
             }
-
-            Commit();
         }
 
         /***********************************************************************

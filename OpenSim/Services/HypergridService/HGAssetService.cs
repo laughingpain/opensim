@@ -71,7 +71,7 @@ namespace OpenSim.Services.HypergridService
                 throw new Exception("No HGAssetService configuration");
 
             string userAccountsDll = assetConfig.GetString("UserAccountsService", string.Empty);
-            if (userAccountsDll == string.Empty)
+            if (userAccountsDll.Length == 0)
                 throw new Exception("Please specify UserAccountsService in HGAssetService configuration");
 
             Object[] args = new Object[] { config };
@@ -81,7 +81,7 @@ namespace OpenSim.Services.HypergridService
 
             m_HomeURL = Util.GetConfigVarFromSections<string>(config, "HomeURI",
                 new string[] { "Startup", "Hypergrid", configName }, string.Empty);
-            if (m_HomeURL == string.Empty)
+            if (m_HomeURL.Length == 0)
                 throw new Exception("[HGAssetService] No HomeURI specified");
 
             m_Cache = UserAccountCache.CreateUserAccountCache(m_UserAccountService);
@@ -123,6 +123,16 @@ namespace OpenSim.Services.HypergridService
             AdjustIdentifiers(asset.Metadata);
 
             return asset;
+        }
+
+        public AssetBase Get(string id, string ForeignAssetService, bool dummy)
+        {
+            return null;
+        }
+
+        public void Get(string id, string ForeignAssetService, bool StoreOnLocalGrid, SimpleAssetRetrieved callBack)
+        {
+            return;
         }
 
         public AssetMetadata GetMetadata(string id)

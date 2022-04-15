@@ -182,7 +182,7 @@ namespace OpenSim
             // The location can also be specified in the environment. If there
             // is no location in the configuration, we must call the constructor
             // without a location parameter to allow that to happen.
-            if (registryLocation == String.Empty)
+            if (registryLocation.Length == 0)
             {
                 using (PluginLoader<IApplicationPlugin> loader = new PluginLoader<IApplicationPlugin>(new ApplicationPluginInitialiser(this)))
                 {
@@ -353,7 +353,6 @@ namespace OpenSim
             if (startupConfig == null || startupConfig.GetBoolean("JobEngineEnabled", true))
                 WorkManager.JobEngine.Start();
 
-           
             if(m_networkServersInfo.HttpUsesSSL)
             {
                 m_httpServerSSL = true;
@@ -406,6 +405,13 @@ namespace OpenSim
         /// <returns></returns>
         public void CreateRegion(RegionInfo regionInfo, bool portadd_flag, bool do_post_init, out IScene mscene)
         {
+            IRegionModulesController controller;
+            if (!ApplicationRegistry.TryGet(out controller))
+            {
+                m_log.Fatal("REGIONMODULES]: The new RegionModulesController is missing...");
+                Environment.Exit(0);
+            }
+
             int port = regionInfo.InternalEndPoint.Port;
 
             // set initial RegionID to originRegionID in RegionInfo. (it needs for loding prims)
@@ -429,7 +435,6 @@ namespace OpenSim
                 regionInfo.ServerURI = "http://" + regionInfo.ExternalHostName +
                          ":" + regionInfo.HttpPort.ToString() + "/";
 
-
             regionInfo.osSecret = m_osSecret;
 
             if ((proxyUrl.Length > 0) && (portadd_flag))
@@ -442,16 +447,10 @@ namespace OpenSim
 
             Scene scene = SetupScene(regionInfo, proxyOffset, Config);
 
-            m_log.Info("[MODULES]: Loading Region's modules (old style)");
+            m_log.Info("[REGIONMODULES]: Loading Region's modules");
 
-            // Use this in the future, the line above will be deprecated soon
-            m_log.Info("[REGIONMODULES]: Loading Region's modules (new style)");
-            IRegionModulesController controller;
-            if (ApplicationRegistry.TryGet(out controller))
-            {
+            if (controller != null)
                 controller.AddRegionToModules(scene);
-            }
-            else m_log.Error("[REGIONMODULES]: The new RegionModulesController is missing...");
 
             if (m_securePermissionsLoading)
             {
@@ -480,7 +479,7 @@ namespace OpenSim
                 scene.SnmpService.BootInfo("Loading prims", scene);
             }
 
-            while (regionInfo.EstateSettings.EstateOwner == UUID.Zero && MainConsole.Instance != null)
+            while (regionInfo.EstateSettings.EstateOwner.IsZero() && MainConsole.Instance != null)
                 SetUpEstateOwner(scene);
 
             scene.loadAllLandObjectsFromStorage(regionInfo.originRegionID);
@@ -520,8 +519,7 @@ namespace OpenSim
                 scene.SnmpService.BootInfo("Grid Registration done", scene);
             }
 
-            // We need to do this after we've initialized the
-            // scripting engines.
+            // We need to do this after we've initialized the scripting engines.
             scene.CreateScriptInstances();
 
             if (scene.SnmpService != null)
@@ -640,7 +638,7 @@ namespace OpenSim
                     }
 
                     // If we've been given a zero uuid then this signals that we should use a random user id
-                    if (estateOwnerUuid == UUID.Zero)
+                    if (estateOwnerUuid.IsZero())
                         estateOwnerUuid = UUID.Random();
 
                     account
@@ -1032,7 +1030,7 @@ namespace OpenSim
                 regInfo.EstateSettings = EstateDataService.LoadEstateSettings(regInfo.RegionID, false);
 
             if (regInfo.EstateSettings.EstateID != 0)
-                return false;	// estate info in the database did not change
+                return false;    // estate info in the database did not change
 
             m_log.WarnFormat("[ESTATE] Region {0} is not part of an estate.", regInfo.RegionName);
 
@@ -1042,21 +1040,56 @@ namespace OpenSim
             foreach (EstateSettings estate in estates)
                 estatesByName[estate.EstateName] = estate;
 
-            string defaultEstateName = null;
+            //##
+            // Target Estate Specified in Region.ini
+            string targetEstateIDstr = regInfo.GetSetting("TargetEstate");
 
+            if (!string.IsNullOrWhiteSpace(targetEstateIDstr))
+            {
+                bool targetEstateJoined = false;
+
+                if (Int32.TryParse(targetEstateIDstr, out int targetEstateID) && targetEstateID > 99)
+                {
+                    // Attempt to join the target estate given in Config by ID
+                    foreach (EstateSettings estate in estates)
+                    {
+                        if (estate.EstateID == targetEstateID)
+                        {
+                            if (EstateDataService.LinkRegion(regInfo.RegionID, targetEstateID))
+                                targetEstateJoined = true;
+
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    // Attempt to join the target estate given in Config by name
+                    if (estatesByName.TryGetValue(targetEstateIDstr, out EstateSettings targetEstate))
+                    {
+                        if (EstateDataService.LinkRegion(regInfo.RegionID, (int)targetEstate.EstateID))
+                            targetEstateJoined = true;
+                    }
+                }
+
+                if (targetEstateJoined)
+                    return true; // need to update the database
+                else
+                    m_log.ErrorFormat(
+                        "[OPENSIM BASE]: Joining target estate specified in region config {0} failed", targetEstateIDstr);
+            }
+            //##
+
+            // Default Estate
             if (Config.Configs[ESTATE_SECTION_NAME] != null)
             {
-                defaultEstateName = Config.Configs[ESTATE_SECTION_NAME].GetString("DefaultEstateName", null);
+                string defaultEstateName = Config.Configs[ESTATE_SECTION_NAME].GetString("DefaultEstateName", null);
 
                 if (defaultEstateName != null)
                 {
-                    EstateSettings defaultEstate;
                     bool defaultEstateJoined = false;
-
-                    if (estatesByName.ContainsKey(defaultEstateName))
+                    if (estatesByName.TryGetValue(defaultEstateName, out EstateSettings defaultEstate))
                     {
-                        defaultEstate = estatesByName[defaultEstateName];
-
                         if (EstateDataService.LinkRegion(regInfo.RegionID, (int)defaultEstate.EstateID))
                             defaultEstateJoined = true;
                     }
@@ -1088,8 +1121,7 @@ namespace OpenSim
                 }
                 else
                 {
-                    string response
-                        = MainConsole.Instance.Prompt(
+                    string response = MainConsole.Instance.Prompt(
                             string.Format(
                                 "Do you wish to join region {0} to an existing estate (yes/no)?", regInfo.RegionName),
                                 "yes",
@@ -1129,10 +1161,10 @@ namespace OpenSim
                         MainConsole.Instance.Output("Joining the estate failed. Please try again.");
                     }
                 }
-    	    }
+            }
 
-    	    return true;	// need to update the database
-    	}
+            return true;    // need to update the database
+        }
     }
 
     public class OpenSimConfigSource

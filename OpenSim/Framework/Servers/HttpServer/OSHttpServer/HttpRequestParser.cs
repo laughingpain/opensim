@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using OSHttpServer.Exceptions;
+using OpenMetaverse;
 
 namespace OSHttpServer.Parser
 {
@@ -10,11 +11,11 @@ namespace OSHttpServer.Parser
     public class HttpRequestParser : IHttpRequestParser
     {
         private ILogWriter m_log;
-        private readonly BodyEventArgs m_bodyArgs = new BodyEventArgs();
         private readonly HeaderEventArgs m_headerArgs = new HeaderEventArgs();
+        private readonly BodyEventArgs m_bodyEventArgs = new BodyEventArgs();
         private readonly RequestLineEventArgs m_requestLineArgs = new RequestLineEventArgs();
-        private string m_curHeaderName = string.Empty;
-        private string m_curHeaderValue = string.Empty;
+        private osUTF8Slice m_curHeaderName = new osUTF8Slice();
+        private osUTF8Slice m_curHeaderValue = new osUTF8Slice();
         private int m_bodyBytesLeft;
 
         /// <summary>
@@ -52,13 +53,18 @@ namespace OSHttpServer.Parser
         private int AddToBody(byte[] buffer, int offset, int count)
         {
             // got all bytes we need, or just a few of them?
-            int bytesUsed = count > m_bodyBytesLeft ? m_bodyBytesLeft : count;
-            m_bodyArgs.Buffer = buffer;
-            m_bodyArgs.Offset = offset;
-            m_bodyArgs.Count = bytesUsed;
-            BodyBytesReceived?.Invoke(this, m_bodyArgs);
+            int bytesCount = count > m_bodyBytesLeft ? m_bodyBytesLeft : count;
 
-            m_bodyBytesLeft -= bytesUsed;
+            if(BodyBytesReceived != null)
+            {
+                m_bodyEventArgs.Buffer = buffer;
+                m_bodyEventArgs.Offset = offset;
+                m_bodyEventArgs.Count = bytesCount;
+                BodyBytesReceived?.Invoke(this, m_bodyEventArgs);
+                m_bodyEventArgs.Buffer = null;
+            }
+
+            m_bodyBytesLeft -= bytesCount;
             if (m_bodyBytesLeft == 0)
             {
                 // got a complete request.
@@ -67,7 +73,7 @@ namespace OSHttpServer.Parser
                 Clear();
             }
 
-            return offset + bytesUsed;
+            return offset + bytesCount;
         }
 
         /// <summary>
@@ -76,8 +82,8 @@ namespace OSHttpServer.Parser
         public void Clear()
         {
             m_bodyBytesLeft = 0;
-            m_curHeaderName = string.Empty;
-            m_curHeaderValue = string.Empty;
+            m_curHeaderName.Clear();
+            m_curHeaderValue.Clear();
             CurrentState = RequestParserState.FirstLine;
         }
 
@@ -139,29 +145,39 @@ namespace OSHttpServer.Parser
                 throw new BadRequestException("Invalid HTTP version in Request line. Line: " + value);
             }
 
-            m_requestLineArgs.HttpMethod = method;
-            m_requestLineArgs.HttpVersion = version;
-            m_requestLineArgs.UriPath = path;
-            RequestLineReceived(this, m_requestLineArgs);
+            if(RequestLineReceived != null)
+            {
+                m_requestLineArgs.HttpMethod = method;
+                m_requestLineArgs.HttpVersion = version;
+                m_requestLineArgs.UriPath = path;
+                RequestLineReceived?.Invoke(this, m_requestLineArgs);
+            }
         }
 
+        private static readonly byte[] OSUTF8contentlength = osUTF8.GetASCIIBytes("content-length");
         /// <summary>
         /// We've parsed a new header.
         /// </summary>
         /// <param name="name">Name in lower case</param>
         /// <param name="value">Value, unmodified.</param>
         /// <exception cref="BadRequestException">If content length cannot be parsed.</exception>
-        protected void OnHeader(string name, string value)
+        protected void OnHeader()
         {
-            m_headerArgs.Name = name;
-            m_headerArgs.Value = value;
-            if (string.Compare(name, "content-length", true) == 0)
+            if (m_curHeaderName.ACSIILowerEquals(OSUTF8contentlength))
             {
-                if (!int.TryParse(value, out m_bodyBytesLeft))
+                if (!m_curHeaderValue.TryParseInt(out m_bodyBytesLeft))
                     throw new BadRequestException("Content length is not a number.");
             }
 
-            HeaderReceived?.Invoke(this, m_headerArgs);
+            if (HeaderReceived != null)
+            {
+                m_headerArgs.Name = m_curHeaderName;
+                m_headerArgs.Value = m_curHeaderValue.ToString();
+                HeaderReceived?.Invoke(this, m_headerArgs);
+            }
+
+            m_curHeaderName.Clear();
+            m_curHeaderValue.Clear();
         }
 
         private void OnRequestCompleted()
@@ -224,21 +240,24 @@ namespace OSHttpServer.Parser
                             m_log.Write(this, LogPrio.Warning, "HTTP Request is too large.");
                             throw new BadRequestException("Too large request line.");
                         }
-                        if (char.IsLetterOrDigit(ch) && startPos == -1)
-                            startPos = currentPos;
-                        if (startPos == -1 && (ch != '\r' || nextCh != '\n'))
+                        if (startPos == -1)
                         {
-                            m_log.Write(this, LogPrio.Warning, "Request line is not found.");
-                            throw new BadRequestException("Invalid request line.");
+                            if(char.IsLetterOrDigit(ch))
+                                startPos = currentPos;
+                            else if (ch != '\r' || nextCh != '\n')
+                            {
+                                m_log.Write(this, LogPrio.Warning, "Request line is not found.");
+                                throw new BadRequestException("Invalid request line.");
+                            }
                         }
-                        if (startPos != -1 && (ch == '\r' || ch == '\n'))
+                        else if(ch == '\r' || ch == '\n')
                         {
                             int size = GetLineBreakSize(buffer, currentPos);
                             OnFirstLine(Encoding.UTF8.GetString(buffer, startPos, currentPos - startPos));
-                            CurrentState = CurrentState + 1;
                             currentPos += size - 1;
-                            handledBytes = currentPos + size - 1;
+                            handledBytes = currentPos + 1;
                             startPos = -1;
+                            CurrentState = RequestParserState.HeaderName;
                         }
                         break;
                     case RequestParserState.HeaderName:
@@ -271,21 +290,22 @@ namespace OSHttpServer.Parser
                                            "Expected header name, got colon on line " + currentLine);
                                 throw new BadRequestException("Expected header name, got colon on line " + currentLine);
                             }
-                            m_curHeaderName = Encoding.UTF8.GetString(buffer, startPos, currentPos - startPos);
+                            m_curHeaderName = new osUTF8Slice(buffer, startPos, currentPos - startPos);
                             handledBytes = currentPos + 1;
-                            startPos = -1;
-                            CurrentState = CurrentState + 1;
+                            startPos = handledBytes;
                             if (ch == ':')
-                                CurrentState = CurrentState + 1;
+                                CurrentState = RequestParserState.Between;
+                            else
+                                CurrentState = RequestParserState.AfterName;
                         }
-                        else if (startPos == -1)
-                            startPos = currentPos;
                         else if (!char.IsLetterOrDigit(ch) && ch != '-')
                         {
                             m_log.Write(this, LogPrio.Warning, "Invalid character in header name on line " + currentLine);
                             throw new BadRequestException("Invalid character in header name on line " + currentLine);
                         }
-                        if (startPos != -1 && currentPos - startPos > 200)
+                        if (startPos == -1)
+                            startPos = currentPos;
+                        else if (currentPos - startPos > 200)
                         {
                             m_log.Write(this, LogPrio.Warning, "Invalid header name on line " + currentLine);
                             throw new BadRequestException("Invalid header name on line " + currentLine);
@@ -295,85 +315,112 @@ namespace OSHttpServer.Parser
                         if (ch == ':')
                         {
                             handledBytes = currentPos + 1;
-                            CurrentState = CurrentState + 1;
+                            startPos = currentPos;
+                            CurrentState = RequestParserState.Between;
+                        }
+                        else if(currentPos - startPos > 256)
+                        {
+                            m_log.Write(this, LogPrio.Warning, "missing header aftername ':' " + currentLine);
+                            throw new BadRequestException("missing header aftername ':' " + currentLine);
                         }
                         break;
                     case RequestParserState.Between:
                     {
                         if (ch == ' ' || ch == '\t')
-                            continue;
-                        int newLineSize = GetLineBreakSize(buffer, currentPos);
-                        if (newLineSize > 0 && currentPos + newLineSize < endOfBufferPos &&
-                            char.IsWhiteSpace((char)buffer[currentPos + newLineSize]))
                         {
-                            ++currentPos;
-                            continue;
+                            if (currentPos - startPos > 256)
+                            {
+                                m_log.Write(this, LogPrio.Warning, "header value too far" + currentLine);
+                                throw new BadRequestException("header value too far" + currentLine);
+                            }
                         }
-                        startPos = currentPos;
-                        CurrentState = CurrentState + 1;
-                        handledBytes = currentPos;
-                        continue;
+                        else
+                        {
+                            int newLineSize = GetLineBreakSize(buffer, currentPos);
+                            if (newLineSize > 0 && currentPos + newLineSize < endOfBufferPos &&
+                                char.IsWhiteSpace((char)buffer[currentPos + newLineSize]))
+                            {
+                                if (currentPos - startPos > 256)
+                                {
+                                    m_log.Write(this, LogPrio.Warning, "header value too" + currentLine);
+                                    throw new BadRequestException("header value too far" + currentLine);
+                                }
+                                ++currentPos;
+                            }
+                            else
+                            {
+                                startPos = currentPos;
+                                handledBytes = currentPos;
+                                CurrentState = RequestParserState.HeaderValue;
+                            }
+                        }
+                        break;
                     }
                     case RequestParserState.HeaderValue:
                     {
-                        if (ch != '\r' && ch != '\n')
-                            continue;
-                        int newLineSize = GetLineBreakSize(buffer, currentPos);
-                        if (startPos == -1)
-                            continue; // allow new lines before start of value
-
-                        if (m_curHeaderName == string.Empty)
-                            throw new BadRequestException("Missing header on line " + currentLine);
-                        if (startPos == -1)
+                        if (ch == '\r' || ch == '\n')
                         {
-                            m_log.Write(this, LogPrio.Warning, "Missing header value for '" + m_curHeaderName);
-                            throw new BadRequestException("Missing header value for '" + m_curHeaderName);
-                        }
-                        if (currentPos - startPos > 8190)
-                        {
-                            m_log.Write(this, LogPrio.Warning, "Too large header value on line " + currentLine);
-                            throw new BadRequestException("Too large header value on line " + currentLine);
-                        }
+                            if (m_curHeaderName.Length == 0)
+                                throw new BadRequestException("Missing header on line " + currentLine);
+ 
+                            if (currentPos - startPos > 8190)
+                            {
+                                m_log.Write(this, LogPrio.Warning, "Too large header value on line " + currentLine);
+                                throw new BadRequestException("Too large header value on line " + currentLine);
+                            }
 
-                        // Header fields can be extended over multiple lines by preceding each extra line with at
-                        // least one SP or HT.
-                        if (endOfBufferPos > currentPos + newLineSize
-                            && (buffer[currentPos + newLineSize] == ' ' || buffer[currentPos + newLineSize] == '\t'))
-                        {
-                            if (startPos != -1)
-                                m_curHeaderValue = Encoding.UTF8.GetString(buffer, startPos, currentPos - startPos);
+                            // Header fields can be extended over multiple lines by preceding each extra line with at
+                            // least one SP or HT.
+                            int newLineSize = GetLineBreakSize(buffer, currentPos);
+                            if (endOfBufferPos > currentPos + newLineSize
+                                && (buffer[currentPos + newLineSize] == ' ' || buffer[currentPos + newLineSize] == '\t'))
+                            {
+                                if (startPos != -1)
+                                {
+                                    osUTF8Slice osUTF8SliceTmp = new osUTF8Slice(buffer, startPos, currentPos - startPos);
+                                    if (m_curHeaderValue.Length == 0)
+                                        m_curHeaderValue = osUTF8SliceTmp.Clone();
+                                    else
+                                        m_curHeaderValue.Append(osUTF8SliceTmp);
+                                }
+                                m_log.Write(this, LogPrio.Trace, "Header value is on multiple lines.");
+                                CurrentState = RequestParserState.Between;
+                                currentPos += newLineSize - 1;
+                                startPos = currentPos;
+                                handledBytes = currentPos + 1;
+                            }
+                            else
+                            {
+                                osUTF8Slice osUTF8SliceTmp = new osUTF8Slice(buffer, startPos, currentPos - startPos);
+                                if (m_curHeaderValue.Length == 0)
+                                    m_curHeaderValue = osUTF8SliceTmp.Clone();
+                                else
+                                    m_curHeaderValue.Append(osUTF8SliceTmp);
 
-                            m_log.Write(this, LogPrio.Trace, "Header value is on multiple lines.");
-                            CurrentState = RequestParserState.Between;
-                            startPos = -1;
-                            currentPos += newLineSize - 1;
-                            handledBytes = currentPos + newLineSize - 1;
-                            continue;
-                        }
+                                m_log.Write(this, LogPrio.Trace, "Header [" + m_curHeaderName + ": " + m_curHeaderValue + "]");
 
-                        m_curHeaderValue += Encoding.UTF8.GetString(buffer, startPos, currentPos - startPos);
-                        m_log.Write(this, LogPrio.Trace, "Header [" + m_curHeaderName + ": " + m_curHeaderValue + "]");
-                        OnHeader(m_curHeaderName, m_curHeaderValue);
+                                OnHeader();
 
-                        startPos = -1;
-                        CurrentState = RequestParserState.HeaderName;
-                        m_curHeaderValue = string.Empty;
-                        m_curHeaderName = string.Empty;
-                        ++currentPos;
-                        handledBytes = currentPos + 1;
+                                startPos = -1;
+                                CurrentState = RequestParserState.HeaderName;
+                                currentPos += newLineSize - 1;
+                                handledBytes = currentPos + 1;
 
-                        // Check if we got a colon so we can cut header name, or crlf for end of header.
-                        bool canContinue = false;
-                        for (int j = currentPos; j < endOfBufferPos; ++j)
-                        {
-                            if (buffer[j] != ':' && buffer[j] != '\r' && buffer[j] != '\n') continue;
-                            canContinue = true;
-                            break;
-                        }
-                        if (!canContinue)
-                        {
-                            m_log.Write(this, LogPrio.Trace, "Cant continue, no colon.");
-                            return currentPos + 1;
+                                // Check if we got a colon so we can cut header name, or crlf for end of header.
+                                bool canContinue = false;
+                                for (int j = currentPos; j < endOfBufferPos; ++j)
+                                {
+                                    if (buffer[j] != ':' && buffer[j] != '\r' && buffer[j] != '\n')
+                                        continue;
+                                    canContinue = true;
+                                    break;
+                                }
+                                if (!canContinue)
+                                {
+                                    m_log.Write(this, LogPrio.Trace, "Cant continue, no colon.");
+                                    return currentPos + 1;
+                                }
+                            }
                         }
                     }
                     break;

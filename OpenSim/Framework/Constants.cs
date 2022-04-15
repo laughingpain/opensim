@@ -43,13 +43,25 @@ namespace OpenSim.Framework
         public const uint MaximumRegionSize = 4096;
 
         // Since terrain is stored in 16x16 heights, regions must be a multiple of this number and that is the minimum
-        public const int MinRegionSize = 16;
+        // but for placement on a grid min must be 256m
+        public const int MinRegionSize = 256;
         public const int TerrainPatchSize = 16;
+
+        public const int LandUnit = 4; // parcels only have sizes multiple of this
+
+        public const float MinSimulationHeight = -100f;
+        public const float MaxSimulationHeight = 50000f;
+        public const float MinTerrainHeightmap = -100f;
+        public const float MaxTerrainHeightmap = 4000f;
 
         public const string DefaultTexture = "89556747-24cb-43ed-920b-47caed15465f";
 
-        public static readonly UUID m_MrOpenSimID = new UUID("11111111-1111-0000-0000-000100bba000");
+        public static readonly string m_MrOpenSimIDString = "11111111-1111-0000-0000-000100bba000";
+        public static readonly UUID m_MrOpenSimID = new UUID(m_MrOpenSimIDString);
         public static readonly DateTime m_MrOpenSimBorn = new DateTime(2007, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        public static readonly string servicesAgentIDString = "6571e388-6218-4574-87db-f9379718315e";
+        public static readonly UUID servicesGodAgentID = new UUID(servicesAgentIDString);
 
         public enum EstateAccessCodex : uint
         {

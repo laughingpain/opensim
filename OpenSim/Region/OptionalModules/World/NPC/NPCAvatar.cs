@@ -180,32 +180,27 @@ namespace OpenSim.Region.OptionalModules.World.NPC
             if (!objectTouchable)
                 return false;
             // Set up the surface args as if the touch is from a client that does not support this
-            SurfaceTouchEventArgs surfaceArgs = new SurfaceTouchEventArgs();
-            surfaceArgs.FaceIndex = -1; // TOUCH_INVALID_FACE
-            surfaceArgs.Binormal =  Vector3.Zero; // TOUCH_INVALID_VECTOR
-            surfaceArgs.Normal =  Vector3.Zero; // TOUCH_INVALID_VECTOR
-            surfaceArgs.STCoord = new Vector3(-1.0f, -1.0f, 0.0f); // TOUCH_INVALID_TEXCOORD
-            surfaceArgs.UVCoord = surfaceArgs.STCoord; // TOUCH_INVALID_TEXCOORD
-            List<SurfaceTouchEventArgs> touchArgs = new List<SurfaceTouchEventArgs>();
-            touchArgs.Add(surfaceArgs);
+            SurfaceTouchEventArgs surfaceArgs = new SurfaceTouchEventArgs()
+            {
+                FaceIndex = -1, // TOUCH_INVALID_FACE
+                Binormal =  Vector3.Zero, // TOUCH_INVALID_VECTOR
+                Normal =  Vector3.Zero, // TOUCH_INVALID_VECTOR
+                STCoord = new Vector3(-1.0f, -1.0f, 0.0f), // TOUCH_INVALID_TEXCOORD
+                UVCoord = new Vector3(-1.0f, -1.0f, 0.0f) // TOUCH_INVALID_TEXCOORD
+            };
+            List<SurfaceTouchEventArgs> touchArgs = new List<SurfaceTouchEventArgs>() { surfaceArgs };
             Vector3 offset = part.OffsetPosition * -1.0f;
             if (OnGrabObject == null)
                 return false;
             OnGrabObject(part.LocalId, offset, this, touchArgs);
-            if (OnGrabUpdate != null)
-                OnGrabUpdate(part.UUID, offset, part.ParentGroup.RootPart.GroupPosition, this, touchArgs);
-            if (OnDeGrabObject != null)
-                OnDeGrabObject(part.LocalId, this, touchArgs);
+            OnGrabUpdate?.Invoke(part.UUID, offset, part.ParentGroup.RootPart.GroupPosition, this, touchArgs);
+            OnDeGrabObject?.Invoke(part.LocalId, this, touchArgs);
             return true;
         }
 
         private bool hasTouchEvents(SceneObjectPart part)
         {
-            if ((part.ScriptEvents & scriptEvents.touch) != 0 ||
-                (part.ScriptEvents & scriptEvents.touch_start) != 0 ||
-                (part.ScriptEvents & scriptEvents.touch_end) != 0)
-                return true;
-            return false;
+           return (part.ScriptEvents & scriptEvents.anytouch) != 0;
         }
 
         public void InstantMessage(UUID target, string message)
@@ -213,7 +208,7 @@ namespace OpenSim.Region.OptionalModules.World.NPC
             OnInstantMessage(this, new GridInstantMessage(m_scene,
                     m_uuid, m_firstname + " " + m_lastname,
                     target, 0, false, message,
-                    UUID.Zero, false, Position, new byte[0], true));
+                    UUID.Zero, false, Position, Array.Empty<byte>(), true));
         }
 
         public void SendAgentOffline(UUID[] agentIDs)
@@ -263,25 +258,29 @@ namespace OpenSim.Region.OptionalModules.World.NPC
 
         private void SendOnChatFromClient(int channel, string message, ChatTypeEnum chatType)
         {
+            if(OnChatFromClient == null)
+                return;
+
             if (channel == 0)
             {
                 message = message.Trim();
                 if (string.IsNullOrEmpty(message))
-                {
                     return;
-                }
             }
-            OSChatMessage chatFromClient = new OSChatMessage();
-            chatFromClient.Channel = channel;
-            chatFromClient.From = Name;
-            chatFromClient.Message = message;
-            chatFromClient.Position = StartPos;
-            chatFromClient.Scene = m_scene;
-            chatFromClient.Sender = this;
-            chatFromClient.SenderUUID = AgentId;
-            chatFromClient.Type = chatType;
 
-            OnChatFromClient(this, chatFromClient);
+            OSChatMessage chatFromClient = new OSChatMessage()
+            {
+                Channel = channel,
+                From = Name,
+                Message = message,
+                Position = StartPos,
+                Scene = m_scene,
+                Sender = this,
+                SenderUUID = AgentId,
+                Type = chatType
+            };
+
+            OnChatFromClient?.Invoke(this, chatFromClient);
         }
 
         #endregion
@@ -706,7 +705,7 @@ namespace OpenSim.Region.OptionalModules.World.NPC
         }
         public byte[] GetThrottlesPacked(float multiplier)
         {
-            return new byte[0];
+            return Array.Empty<byte>();
         }
 
 
@@ -718,18 +717,12 @@ namespace OpenSim.Region.OptionalModules.World.NPC
             string message, byte type, Vector3 fromPos, string fromName,
             UUID fromAgentID, UUID ownerID, byte source, byte audible)
         {
-            ChatToNPC ctn = OnChatToNPC;
-
-            if (ctn != null)
-                ctn(message, type, fromPos, fromName, fromAgentID, ownerID, source, audible);
+            OnChatToNPC?.Invoke(message, type, fromPos, fromName, fromAgentID, ownerID, source, audible);
         }
 
         public void SendInstantMessage(GridInstantMessage im)
         {
-            Action<GridInstantMessage> oimtn = OnInstantMessageToNPC;
-
-            if (oimtn != null)
-                oimtn(im);
+            OnInstantMessageToNPC?.Invoke(im);
         }
 
         public void SendGenericMessage(string method, UUID invoice, List<string> message)
@@ -757,7 +750,6 @@ namespace OpenSim.Region.OptionalModules.World.NPC
 
         public virtual void SendWindData(int version, Vector2[] windSpeeds) { }
 
-        public virtual void SendCloudData(int version, float[] cloudCover) { }
 
         public virtual void MoveAgentIntoRegion(RegionInfo regInfo, Vector3 pos, Vector3 look)
         {
@@ -848,11 +840,11 @@ namespace OpenSim.Region.OptionalModules.World.NPC
         {
         }
 
-        public virtual void SendInventoryItemDetails(InventoryItemBase[] items)
+        public void SendInventoryItemDetails(InventoryItemBase[] items)
         {
         }
 
-        public virtual void SendInventoryItemCreateUpdate(InventoryItemBase Item, uint callbackID)
+        public void SendInventoryItemCreateUpdate(InventoryItemBase Item, uint callbackID)
         {
         }
 
@@ -860,11 +852,19 @@ namespace OpenSim.Region.OptionalModules.World.NPC
         {
         }
 
-        public virtual void SendRemoveInventoryItem(UUID itemID)
+        public void SendRemoveInventoryItem(UUID itemID)
         {
         }
 
-        public virtual void SendBulkUpdateInventory(InventoryNodeBase node)
+        public void SendRemoveInventoryItems(UUID[] items)
+        {
+        }
+
+        public void SendBulkUpdateInventory(InventoryNodeBase node, UUID? transactionID = null)
+        {
+        }
+
+        public void SendBulkUpdateInventory(InventoryFolderBase[] folders, InventoryItemBase[] items)
         {
         }
 
@@ -872,7 +872,7 @@ namespace OpenSim.Region.OptionalModules.World.NPC
         {
         }
 
-        public virtual void SendTaskInventory(UUID taskID, short serial, byte[] fileName)
+        public void SendTaskInventory(UUID taskID, short serial, byte[] fileName)
         {
         }
 
@@ -938,10 +938,7 @@ namespace OpenSim.Region.OptionalModules.World.NPC
 
         public virtual void SendRegionHandshake()
         {
-            if (OnRegionHandShakeReply != null)
-            {
-                OnRegionHandShakeReply(this);
-            }
+            OnRegionHandShakeReply?.Invoke(this);
         }
 
         public void SendAssetUploadCompleteMessage(sbyte AssetType, bool Success, UUID AssetFullID)
@@ -1029,6 +1026,11 @@ namespace OpenSim.Region.OptionalModules.World.NPC
         {
             // Remove ourselves from the scene
             m_scene.RemoveClient(AgentId, false);
+        }
+
+        public void Disconnect(string reason)
+        {
+            Close(true, false);
         }
 
         public void Start()

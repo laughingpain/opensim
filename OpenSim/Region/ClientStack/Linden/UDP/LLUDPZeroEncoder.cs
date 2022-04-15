@@ -273,7 +273,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
 
         public void AddVector3(Vector3 v)
         {
-            if (v == Vector3.Zero)
+            if (v.IsZero())
                 AddZeros(12);
             else
             {
@@ -284,7 +284,7 @@ namespace OpenSim.Region.ClientStack.LindenUDP
 
         public void AddVector4(Vector4 v)
         {
-            if (v == Vector4.Zero)
+            if (v.IsZero())
                 AddZeros(16);
             else
             {
@@ -350,6 +350,27 @@ namespace OpenSim.Region.ClientStack.LindenUDP
 
             AddByte((byte)(len));
             AddBytes(data, len);
+        }
+
+        // maxlen <= 254 because null termination byte
+        public unsafe void AddShortLimitedUTF8(osUTF8 str)
+        {
+            if(str == null)
+            {
+                AddZeros(1);
+                return;
+            }
+
+            int len = str.Length;
+            if (len == 0)
+            {
+                AddZeros(1);
+                return;
+            }
+
+            AddByte((byte)(len + 1)); // add null
+            AddBytes(str.GetArray(), len);
+            AddZeros(1);
         }
     }
 }

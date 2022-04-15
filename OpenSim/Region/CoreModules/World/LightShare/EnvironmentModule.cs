@@ -65,10 +65,15 @@ namespace OpenSim.Region.CoreModules.World.LightShare
         private ILandChannel m_landChannel;
 
         private static ViewerEnvironment m_DefaultEnv = null;
-        // 1/1 night day ratio
-        //private static readonly string m_defaultDayAssetID = "5646d39e-d3d7-6aff-ed71-30fc87d64a91";
-        // 3/1 night day ratio
-        private static readonly string m_defaultDayAssetID = "5646d39e-d3d7-6aff-ed71-30fc87d64a92";
+        // 1/1 day-to-night ratio
+        //private static readonly string m_defaultDayAssetID = "5646d39e-d3d7-6aff-ed71-30fc87d64a91";  // Default Daycycle
+        // 3/1 day-to-night ratio
+        private static string m_defaultDayAssetID = "5646d39e-d3d7-6aff-ed71-30fc87d64a92";             // Default Daycycle (More Daylight)
+        private static UUID m_defaultDayAssetUUID = new UUID("5646d39e-d3d7-6aff-ed71-30fc87d64a92");
+        //private static string m_defaultSkyAssetID = "3ae23978-ac82-bcf3-a9cb-ba6e52dcb9ad";
+        private static UUID m_defaultSkyAssetUUID = new UUID("3ae23978-ac82-bcf3-a9cb-ba6e52dcb9ad");
+        //private static string m_defaultWaterAssetID = "59d1a851-47e7-0e5f-1ed7-6b715154f41a";
+        private static UUID m_defaultWaterAssetUUID = new UUID("59d1a851-47e7-0e5f-1ed7-6b715154f41a");
 
         private int m_regionEnvVersion = -1;
 
@@ -163,10 +168,10 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                         m_DefaultEnv = new ViewerEnvironment();
                         m_DefaultEnv.CycleFromOSD(oenv);
                     }
-                    catch ( Exception e)
+                    catch (Exception e)
                     {
                         m_DefaultEnv = null;
-                        m_log.WarnFormat("[Environment {0}]: failed to decode default environment asset: {1}", m_scene.Name, e.Message);
+                        m_log.Warn(string.Format("[Environment {0}] failed to decode default environment asset ", m_scene.Name), e);
                     }
                 }
             }
@@ -180,16 +185,22 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 {
                     OSD oenv = OSDParser.Deserialize(senv);
                     ViewerEnvironment VEnv = new ViewerEnvironment();
-                    if(oenv is OSDArray)
+                    if (oenv is OSDArray)
+                    {
                         VEnv.FromWLOSD(oenv);
+                        StoreOnRegion(VEnv);
+                        m_log.InfoFormat("[Environment {0}] migrated WindLight environment settings to EEP", m_scene.Name);
+                    }
                     else
+                    {
                         VEnv.FromOSD(oenv);
+                    }
                     scene.RegionEnvironment = VEnv;
                     m_regionEnvVersion = VEnv.version;
                 }
                 catch (Exception e)
                 {
-                    m_log.ErrorFormat("[Environment {0}] failed to load initial Environment {1}", m_scene.Name, e.Message);
+                    m_log.Error(string.Format("[Environment {0}] failed to load initial Environment ", m_scene.Name), e);
                     scene.RegionEnvironment = null;
                     m_regionEnvVersion = -1;
                 }
@@ -241,7 +252,7 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             }
             catch (Exception e)
             {
-                m_log.ErrorFormat("[Environment {0}] failed to store Environment {1}", m_scene.Name, e.Message);
+                m_log.Error(string.Format("[Environment {0}] failed to store Environment ", m_scene.Name), e);
             }
         }
 
@@ -439,13 +450,13 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 }
             }
 
-            StringBuilder sb = LLSDxmlEncode.Start();
-            LLSDxmlEncode.AddMap(sb);
-            LLSDxmlEncode.AddElem("messageID", UUID.Zero, sb);
-            LLSDxmlEncode.AddElem("regionID", regionID, sb);
-            LLSDxmlEncode.AddElem("success", true, sb);
-            LLSDxmlEncode.AddEndMap(sb);
-            httpResponse.RawBuffer = Util.UTF8.GetBytes(LLSDxmlEncode.End(sb));
+            osUTF8 sb = LLSDxmlEncode2.Start();
+            LLSDxmlEncode2.AddMap(sb);
+            LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
+            LLSDxmlEncode2.AddElem("regionID", regionID, sb);
+            LLSDxmlEncode2.AddElem("success", true, sb);
+            LLSDxmlEncode2.AddEndMap(sb);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -460,21 +471,17 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 }
             }
 
-            ViewerEnvironment VEnv = null;
             ScenePresence sp = m_scene.GetScenePresence(agentID);
-
-            if(sp != null && sp.Environment != null)
+            if (sp == null)
             {
-                if (parcelid == -1)
-                    VEnv = sp.Environment;
-                else
-                {
-                    OSD def = ViewerEnvironment.DefaultToOSD(regionID, parcelid);
-                    httpResponse.RawBuffer = OSDParser.SerializeLLSDXmlToBytes(def);
-                    httpResponse.StatusCode = (int)HttpStatusCode.OK;
-                    return;
-                }
+                httpResponse.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                httpResponse.AddHeader("Retry-After", "5");
+                return;
             }
+
+            ViewerEnvironment VEnv = null;
+            if (sp.Environment != null)
+                VEnv = sp.Environment;
             else if (parcelid == -1)
                 VEnv = GetRegionEnvironment();
             else
@@ -494,29 +501,21 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                 }
             }
 
-            OSDMap map = new OSDMap();
-            OSDMap cenv = (OSDMap)VEnv.ToOSD();
-            cenv["parcel_id"] = parcelid;
-            cenv["region_id"] = regionID;
-            map["environment"] = cenv;
-            map["parcel_id"] = parcelid;
-            map["success"] = true;
-
-            string env = OSDParser.SerializeLLSDXmlString(map);
-
-            if (String.IsNullOrEmpty(env))
+            byte[] envBytes = VEnv.ToCapBytes(regionID, parcelid);
+            if(envBytes == null)
             {
-                StringBuilder sb = LLSDxmlEncode.Start();
-                LLSDxmlEncode.AddArray(sb);
-                LLSDxmlEncode.AddMap(sb);
-                LLSDxmlEncode.AddElem("messageID", UUID.Zero, sb);
-                LLSDxmlEncode.AddElem("regionID", regionID, sb);
-                LLSDxmlEncode.AddEndMap(sb);
-                LLSDxmlEncode.AddEndArray(sb);
-                env = LLSDxmlEncode.End(sb);
+                osUTF8 sb = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddArray(sb);
+                LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
+                LLSDxmlEncode2.AddElem("regionID", regionID, sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+                LLSDxmlEncode2.AddEndArray(sb);
+                httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
             }
+            else
+                httpResponse.RawBuffer = envBytes;
 
-            httpResponse.RawBuffer = Util.UTF8NBGetbytes(env);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -527,7 +526,7 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             int parcel = -1;
             int track = -1;
 
-            StringBuilder sb = LLSDxmlEncode.Start();
+            osUTF8 sb = LLSDxmlEncode2.Start();
 
             ScenePresence sp = m_scene.GetScenePresence(agentID);
             if (sp == null || sp.IsChildAgent || sp.IsNPC)
@@ -583,7 +582,7 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                     goto Error;
                 }
 
-                if (!m_scene.Permissions.CanEditParcelProperties(agentID, lchannel, (GroupPowers.AllowEnvironment | GroupPowers.LandEdit), true)) // wrong
+                if (!m_scene.Permissions.CanEditParcelProperties(agentID, lchannel, GroupPowers.AllowEnvironment, true)) // wrong
                 {
                     message = "No permission to change parcel environment";
                     goto Error;
@@ -594,16 +593,16 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             try
             {
                 OSD req = OSDParser.Deserialize(httpRequest.InputStream);
-                if(req is OpenMetaverse.StructuredData.OSDMap)
+                if(req is OSDMap)
                 {
-                    OSDMap map = req as OpenMetaverse.StructuredData.OSDMap;
+                    OSDMap map = req as OSDMap;
                     if(map.TryGetValue("environment", out OSD env))
                     {
                         if (VEnv == null)
                             // need a proper clone
                             VEnv = m_DefaultEnv.Clone();
 
-                        OSDMap evmap = (OSDMap)env;
+                        OSDMap evmap = env as OSDMap;
                         if(evmap.TryGetValue("day_asset", out OSD tmp) && !evmap.ContainsKey("day_cycle"))
                         {
                             string id = tmp.AsString();
@@ -616,7 +615,11 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                             try
                             {
                                 OSD oenv = OSDParser.Deserialize(asset.Data);
-                                VEnv.CycleFromOSD(oenv);
+                                evmap.TryGetValue("day_name", out tmp);
+                                if(tmp is OSDString)
+                                    VEnv.FromAssetOSD(tmp.AsString(), oenv);
+                                else
+                                    VEnv.FromAssetOSD(null, oenv);
                             }
                             catch
                             {
@@ -624,7 +627,9 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                                 return;
                             }
                         }
-                        VEnv.FromOSD(env);
+                        else
+                            VEnv.FromOSD(env);
+
                         if(lchannel == null)
                         {
                             StoreOnRegion(VEnv);
@@ -654,12 +659,12 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                     m_log.InfoFormat("[{0}]: ExtEnvironment region {1} settings from agentID {2} saved",
                                                     Name, caps.RegionName, agentID);
 
-                    LLSDxmlEncode.AddMap(sb);
-                    LLSDxmlEncode.AddElem("messageID", UUID.Zero, sb);
-                    LLSDxmlEncode.AddElem("regionID", regionID, sb);
-                    LLSDxmlEncode.AddElem("success", success, sb);
-                    LLSDxmlEncode.AddEndMap(sb);
-                    httpResponse.RawBuffer = Util.UTF8NBGetbytes(LLSDxmlEncode.End(sb));
+                    LLSDxmlEncode2.AddMap(sb);
+                    LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
+                    LLSDxmlEncode2.AddElem("regionID", regionID, sb);
+                    LLSDxmlEncode2.AddElem("success", success, sb);
+                    LLSDxmlEncode2.AddEndMap(sb);
+                    httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
                     httpResponse.StatusCode = (int)HttpStatusCode.OK;
                     return;
                 }
@@ -674,16 +679,13 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             }
 
         Error:
-            string response;
-
-            LLSDxmlEncode.AddMap(sb);
-                LLSDxmlEncode.AddElem("success", success, sb);
+            LLSDxmlEncode2.AddMap(sb);
+                LLSDxmlEncode2.AddElem("success", success, sb);
                 if(!success)
-                    LLSDxmlEncode.AddElem("message", message, sb);
-            LLSDxmlEncode.AddEndMap(sb);
-            response = LLSDxmlEncode.End(sb);
+                    LLSDxmlEncode2.AddElem("message", message, sb);
+            LLSDxmlEncode2.AddEndMap(sb);
 
-            httpResponse.RawBuffer = Util.UTF8NBGetbytes(response);
+            httpResponse.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
             httpResponse.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -694,7 +696,14 @@ namespace OpenSim.Region.CoreModules.World.LightShare
 
             ViewerEnvironment VEnv = null;
             ScenePresence sp = m_scene.GetScenePresence(agentID);
-            if (sp != null && sp.Environment != null)
+            if (sp == null)
+            {
+                response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+                response.AddHeader("Retry-After", "5");
+                return;
+            }
+
+            if (sp.Environment != null)
                 VEnv = sp.Environment;
             else
             {
@@ -704,26 +713,25 @@ namespace OpenSim.Region.CoreModules.World.LightShare
                     if (land != null && land.LandData != null && land.LandData.Environment != null)
                         VEnv = land.LandData.Environment;
                 }
-                if(VEnv == null)
-                    VEnv = GetRegionEnvironment();
             }
+            if (VEnv == null)
+                VEnv = GetRegionEnvironment();
 
-            OSD d = VEnv.ToWLOSD(UUID.Zero, regionID);
-            string env = OSDParser.SerializeLLSDXmlString(d);
-
-            if (String.IsNullOrEmpty(env))
+            byte[] envBytes = VEnv.ToCapWLBytes(UUID.Zero, regionID);
+            if(envBytes == null)
             {
-                StringBuilder sb = LLSDxmlEncode.Start();
-                    LLSDxmlEncode.AddArray(sb);
-                        LLSDxmlEncode.AddMap(sb);
-                            LLSDxmlEncode.AddElem("messageID", UUID.Zero, sb);
-                            LLSDxmlEncode.AddElem("regionID", regionID, sb);
-                        LLSDxmlEncode.AddEndMap(sb);
-                LLSDxmlEncode.AddEndArray(sb);
-                env = LLSDxmlEncode.End(sb);
+                osUTF8 sb = LLSDxmlEncode2.Start();
+                    LLSDxmlEncode2.AddArray(sb);
+                        LLSDxmlEncode2.AddMap(sb);
+                            LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
+                            LLSDxmlEncode2.AddElem("regionID", regionID, sb);
+                        LLSDxmlEncode2.AddEndMap(sb);
+                LLSDxmlEncode2.AddEndArray(sb);
+                response.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
             }
+            else
+                response.RawBuffer = envBytes;
 
-            response.RawBuffer = Util.UTF8NBGetbytes(env);
             response.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -784,15 +792,15 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             }
 
             Error:
-            StringBuilder sb = LLSDxmlEncode.Start();
-                LLSDxmlEncode.AddMap(sb);
-                    LLSDxmlEncode.AddElem("messageID", UUID.Zero, sb);
-                    LLSDxmlEncode.AddElem("regionID", regionID, sb);
-                    LLSDxmlEncode.AddElem("success", success, sb);
+            osUTF8 sb = LLSDxmlEncode2.Start();
+                LLSDxmlEncode2.AddMap(sb);
+                    LLSDxmlEncode2.AddElem("messageID", UUID.Zero, sb);
+                    LLSDxmlEncode2.AddElem("regionID", regionID, sb);
+                    LLSDxmlEncode2.AddElem("success", success, sb);
                     if(!success)
-                        LLSDxmlEncode.AddElem("fail_reason", fail_reason, sb);
-                LLSDxmlEncode.AddEndMap(sb);
-            response.RawBuffer = Util.UTF8NBGetbytes(LLSDxmlEncode.End(sb));
+                        LLSDxmlEncode2.AddElem("fail_reason", fail_reason, sb);
+                LLSDxmlEncode2.AddEndMap(sb);
+            response.RawBuffer = LLSDxmlEncode2.EndToBytes(sb);
             response.StatusCode = (int)HttpStatusCode.OK;
         }
 
@@ -838,6 +846,20 @@ namespace OpenSim.Region.CoreModules.World.LightShare
             return OSDParser.SerializeLLSDNotationToBytes(osddata,true);
         }
 
+        public UUID GetDefaultAsset(int type)
+        {
+            switch (type)
+            {
+                case 0:
+                    return m_defaultSkyAssetUUID;
+                case 1:
+                    return m_defaultWaterAssetUUID;
+                case 2:
+                    return m_defaultDayAssetUUID;
+                default:
+                    return UUID.Zero;
+            }
+        }
 
         public List<byte[]> MakeLightShareData()
         {
@@ -901,7 +923,7 @@ namespace OpenSim.Region.CoreModules.World.LightShare
 
         private void OnAvatarEnteringNewParcel(ScenePresence sp, int localLandID, UUID regionID)
         {
-            if (sp.Environment != null)
+            if (sp.Environment != null || sp.IsNPC)
                 return;
 
             if (!m_scene.RegionInfo.EstateSettings.AllowEnvironmentOverride)

@@ -83,7 +83,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <summary>
         /// Scenes by Region Handle
         /// </summary>
-        private Dictionary<ulong, Scene> m_scenel = new Dictionary<ulong, Scene>();
+        private Dictionary<ulong, Scene> m_scenes = new Dictionary<ulong, Scene>();
 
         // private int m_stipend = 1000;
 
@@ -138,9 +138,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 scene.RegisterModuleInterface<IMoneyModule>(this);
                 IHttpServer httpServer = MainServer.Instance;
 
-                lock (m_scenel)
+                lock (m_scenes)
                 {
-                    if (m_scenel.Count == 0)
+                    if (m_scenes.Count == 0)
                     {
                         m_localEconomyURL = scene.RegionInfo.ServerURI;
                         m_rpcHandlers = new Dictionary<string, XmlRpcMethod>();
@@ -154,13 +154,13 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                         MainServer.Instance.AddSimpleStreamHandler(new SimpleStreamHandler("/landtool.php", processPHP));
                     }
 
-                    if (m_scenel.ContainsKey(scene.RegionInfo.RegionHandle))
+                    if (m_scenes.ContainsKey(scene.RegionInfo.RegionHandle))
                     {
-                        m_scenel[scene.RegionInfo.RegionHandle] = scene;
+                        m_scenes[scene.RegionInfo.RegionHandle] = scene;
                     }
                     else
                     {
-                        m_scenel.Add(scene.RegionInfo.RegionHandle, scene);
+                        m_scenes.Add(scene.RegionInfo.RegionHandle, scene);
                     }
                 }
 
@@ -182,7 +182,8 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         {
             if (!m_enabled)
                 return;
-
+            if(scene.SceneGridInfo!= null && !string.IsNullOrEmpty(scene.SceneGridInfo.EconomyURL))
+                return;
             ISimulatorFeaturesModule fm = scene.RequestModuleInterface<ISimulatorFeaturesModule>();
             if (fm != null && !string.IsNullOrWhiteSpace(m_localEconomyURL))
             {
@@ -261,7 +262,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
             // economymodule may be at startup or Economy (legacy)
             string mmodule = startupConfig.GetString("economymodule","");
-            if(String.IsNullOrEmpty(mmodule))
+            if(string.IsNullOrEmpty(mmodule))
             {
                 if(economyConfig != null)
                 {
@@ -271,7 +272,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                 }
             }
 
-            if (!String.IsNullOrEmpty(mmodule) && mmodule != Name)
+            if (!string.IsNullOrEmpty(mmodule) && mmodule != Name)
             {
                 // some other money module selected
                 m_enabled = false;
@@ -355,7 +356,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                     client.SendAlertMessage(e.Message + " ");
                 }
 
-                client.SendMoneyBalance(TransactionID, true, new byte[0], returnfunds, 0, UUID.Zero, false, UUID.Zero, false, 0, String.Empty);
+                client.SendMoneyBalance(TransactionID, true, Array.Empty<byte>(), returnfunds, 0, UUID.Zero, false, UUID.Zero, false, 0, String.Empty);
             }
             else
             {
@@ -365,9 +366,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         private SceneObjectPart findPrim(UUID objectID)
         {
-            lock (m_scenel)
+            lock (m_scenes)
             {
-                foreach (Scene s in m_scenel.Values)
+                foreach (Scene s in m_scenes.Values)
                 {
                     SceneObjectPart part = s.GetSceneObjectPart(objectID);
                     if (part != null)
@@ -457,7 +458,7 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
                        if (client != null)
                        {
 
-                           if (soundId != UUID.Zero)
+                           if (!soundId.IsZero())
                                client.SendPlayAttachedSound(soundId, UUID.Zero, UUID.Zero, 1.0f, 0);
 
                            client.SendBlueBoxMessage(UUID.Zero, "", text);
@@ -615,25 +616,14 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <returns></returns>
         private IClientAPI LocateClientObject(UUID AgentID)
         {
-            ScenePresence tPresence = null;
-            IClientAPI rclient = null;
-
-            lock (m_scenel)
+            ScenePresence tPresence;
+            lock (m_scenes)
             {
-                foreach (Scene _scene in m_scenel.Values)
+                foreach (Scene _scene in m_scenes.Values)
                 {
                     tPresence = _scene.GetScenePresence(AgentID);
-                    if (tPresence != null)
-                    {
-                        if (!tPresence.IsChildAgent)
-                        {
-                            rclient = tPresence.ControllingClient;
-                        }
-                    }
-                    if (rclient != null)
-                    {
-                        return rclient;
-                    }
+                    if (tPresence != null && !tPresence.IsDeleted && !tPresence.IsChildAgent)
+                        return tPresence.ControllingClient;
                 }
             }
             return null;
@@ -641,18 +631,13 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
         private Scene LocateSceneClientIn(UUID AgentId)
         {
-            lock (m_scenel)
+            lock (m_scenes)
             {
-                foreach (Scene _scene in m_scenel.Values)
+                foreach (Scene _scene in m_scenes.Values)
                 {
                     ScenePresence tPresence = _scene.GetScenePresence(AgentId);
-                    if (tPresence != null)
-                    {
-                        if (!tPresence.IsChildAgent)
-                        {
-                            return _scene;
-                        }
-                    }
+                    if (tPresence != null && !tPresence.IsDeleted && !tPresence.IsChildAgent)
+                        return _scene;
                 }
             }
             return null;
@@ -664,9 +649,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <returns></returns>
         public Scene GetRandomScene()
         {
-            lock (m_scenel)
+            lock (m_scenes)
             {
-                foreach (Scene rs in m_scenel.Values)
+                foreach (Scene rs in m_scenes.Values)
                     return rs;
             }
             return null;
@@ -679,9 +664,9 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
         /// <returns></returns>
         public Scene GetSceneByUUID(UUID RegionID)
         {
-            lock (m_scenel)
+            lock (m_scenes)
             {
-                foreach (Scene rs in m_scenel.Values)
+                foreach (Scene rs in m_scenes.Values)
                 {
                     if (rs.RegionInfo.originRegionID == RegionID)
                     {
@@ -850,23 +835,35 @@ namespace OpenSim.Region.OptionalModules.World.MoneyModule
 
             // Validate that the object exists in the scene the user is in
             SceneObjectPart part = s.GetSceneObjectPart(localID);
-            if (part == null)
+            if(!part.IsRoot) // silent ignore non root parts
+                return;
+
+            if (part == null || part.ParentGroup == null || part.ParentGroup.IsDeleted)
             {
                 remoteClient.SendAgentAlertMessage("Unable to buy now. The object was not found.", false);
+                return;
+            }
+
+            if (part.ObjectSaleType == (byte)SaleType.Not)
+            {
+                string e = string.Format("Object {0} is not for sale", part.Name);
+                remoteClient.SendAgentAlertMessage(e, false);
                 return;
             }
 
             // Validate that the client sent the price that the object is being sold for
             if (part.SalePrice != salePrice)
             {
-                remoteClient.SendAgentAlertMessage("Cannot buy at this price. Buy Failed. If you continue to get this relog.", false);
+                string e = string.Format("Object {0} price does not match selected price", part.Name);
+                remoteClient.SendAgentAlertMessage(e, false);
                 return;
             }
 
             // Validate that the client sent the proper sale type the object has set
             if (part.ObjectSaleType != saleType)
             {
-                remoteClient.SendAgentAlertMessage("Cannot buy this way. Buy Failed. If you continue to get this relog.", false);
+                string e = string.Format("Object {0} sell type does not match selected type", part.Name);
+                remoteClient.SendAgentAlertMessage(e, false);
                 return;
             }
 

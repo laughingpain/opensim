@@ -45,6 +45,8 @@ using LSL_Key = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLString;
 using LSL_Float = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLFloat;
 using LSL_Integer = OpenSim.Region.ScriptEngine.Shared.LSL_Types.LSLInteger;
 
+#pragma warning disable IDE1006
+
 namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
 {
     public partial class ScriptBaseClass : MarshalByRefObject
@@ -81,7 +83,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_OSSL_Functions.osGetCurrentSunHour();
         }
 
-        public double osGetSunParam(string param)
+        public LSL_Float osGetSunParam(LSL_String param)
         {
             return m_OSSL_Functions.osGetSunParam(param);
         }
@@ -235,7 +237,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_OSSL_Functions.osConsoleCommand(Command);
         }
 
-        public void osSetParcelMediaURL(string url)
+        public void osSetParcelMusicURL(LSL_String url)
+        {
+            m_OSSL_Functions.osSetParcelMusicURL(url);
+        }
+
+        public void osSetParcelMediaURL(LSL_String url)
         {
             m_OSSL_Functions.osSetParcelMediaURL(url);
         }
@@ -456,11 +463,6 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_OSSL_Functions.osGetDrawStringSize(contentType, text, fontName, fontSize);
         }
 
-        public void osSetStateEvents(int events)
-        {
-            m_OSSL_Functions.osSetStateEvents(events);
-        }
-
         public string osGetScriptEngineName()
         {
             return m_OSSL_Functions.osGetScriptEngineName();
@@ -491,7 +493,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             m_OSSL_Functions.osMessageObject(objectUUID,message);
         }
 
-        public void osMakeNotecard(string notecardName, LSL_Types.list contents)
+        public void osMakeNotecard(string notecardName, LSL_String contents)
+        {
+            m_OSSL_Functions.osMakeNotecard(notecardName, contents);
+        }
+
+        public void osMakeNotecard(string notecardName, LSL_List contents)
         {
             m_OSSL_Functions.osMakeNotecard(notecardName, contents);
         }
@@ -519,6 +526,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public string osKey2Name(string id)
         {
             return m_OSSL_Functions.osKey2Name(id);
+        }
+
+        public string osSHA256(string input)
+        {
+            return m_OSSL_Functions.osSHA256(input);
         }
 
         public string osGetGridNick()
@@ -1165,12 +1177,12 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_OSSL_Functions.osRegexIsMatch(input, pattern);
         }
 
-        public LSL_String osRequestURL(LSL_List options)
+        public LSL_Key osRequestURL(LSL_List options)
         {
             return m_OSSL_Functions.osRequestURL(options);
         }
 
-        public LSL_String osRequestSecureURL(LSL_List options)
+        public LSL_Key osRequestSecureURL(LSL_List options)
         {
             return m_OSSL_Functions.osRequestSecureURL(options);
         }
@@ -1205,9 +1217,9 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             m_OSSL_Functions.osSetInertiaAsSphere(mass, radius, centerOfMass);
         }
 
-        public void osSetInertiaAsCylinder(LSL_Float mass,  LSL_Float radius, LSL_Float lenght, vector centerOfMass,rotation lslrot)
+        public void osSetInertiaAsCylinder(LSL_Float mass,  LSL_Float radius, LSL_Float length, vector centerOfMass,rotation lslrot)
         {
-            m_OSSL_Functions.osSetInertiaAsCylinder( mass, radius, lenght, centerOfMass, lslrot);
+            m_OSSL_Functions.osSetInertiaAsCylinder( mass, radius, length, centerOfMass, lslrot);
         }
 
         public void osClearInertia()
@@ -1427,6 +1439,11 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
             return m_OSSL_Functions.osSlerp(a, b, amount);
         }
 
+        public vector osSlerp(vector a, vector b, LSL_Float amount)
+        {
+            return m_OSSL_Functions.osSlerp(a, b, amount);
+        }
+
         public void osResetAllScripts(LSL_Integer allLinkSet)
         {
             m_OSSL_Functions.osResetAllScripts(allLinkSet);
@@ -1522,6 +1539,36 @@ namespace OpenSim.Region.ScriptEngine.Shared.ScriptBase
         public LSL_Integer osResetEnvironment(LSL_Integer parcelOrRegion, LSL_Integer transition)
         {
             return m_OSSL_Functions.osResetEnvironment(parcelOrRegion, transition);
+        }
+
+        public void osParticleSystem(LSL_List rules)
+        {
+            m_OSSL_Functions.osParticleSystem(rules);
+        }
+
+        public void osLinkParticleSystem(LSL_Integer linknumber, LSL_List rules)
+        {
+            m_OSSL_Functions.osLinkParticleSystem(linknumber, rules);
+        }
+
+        public LSL_Integer osNpcLookAt(LSL_Key npckey, LSL_Integer type, LSL_Key objkey, vector offset)
+        {
+            return m_OSSL_Functions.osNpcLookAt(npckey, type, objkey, offset);
+        }
+
+        public LSL_Integer osAvatarType(LSL_Key avkey)
+        {
+            return m_OSSL_Functions.osAvatarType(avkey);
+        }
+
+        public LSL_Integer osAvatarType(LSL_String sFirstName, LSL_String sLastName)
+        {
+            return m_OSSL_Functions.osAvatarType(sFirstName, sLastName);
+        }
+
+        public void osListSortInPlace(LSL_List src, LSL_Integer stride, LSL_Integer ascending)
+        {
+            m_OSSL_Functions.osListSortInPlace(src, stride, ascending);
         }
     }
 }

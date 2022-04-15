@@ -55,7 +55,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
 
         public void InitXMRLSLApi(XMRInstance i)
         {
-            acm = AsyncCommands;
+            acm = m_AsyncCommands;
             inst = i;
         }
 
@@ -194,7 +194,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 public string xmrSetParcelMusicURLGroup (string newurl)
                 {
                     string groupname = m_ScriptEngine.Config.GetString ("SetParcelMusicURLGroup", "");
-                    if (groupname == "") throw new ApplicationException ("no SetParcelMusicURLGroup config param set");
+                    if (groupname.Length == 0) throw new ApplicationException ("no SetParcelMusicURLGroup config param set");
 
                     IGroupsModule igm = World.RequestModuleInterface<IGroupsModule> ();
                     if (igm == null) throw new ApplicationException ("no GroupsModule loaded");
@@ -373,7 +373,7 @@ namespace OpenSim.Region.ScriptEngine.Yengine
                 for(lln = m_EventQueue.First; lln != null; lln = lln.Next)
                 {
                     evt = lln.Value;
-                    evc = (ScriptEventCode)Enum.Parse(typeof(ScriptEventCode), evt.EventName);
+                    m_eventCodeMap.TryGetValue(evt.EventName, out evc);
                     evc1 = (int)evc;
                     evc2 = evc1 - 32;
                     if((((uint)evc1 < (uint)32) && (((mask1 >> evc1) & 1) != 0)) ||
