@@ -14345,11 +14345,18 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
 
         public LSL_List llGetParcelDetails(LSL_Vector pos, LSL_List param)
         {
-            LandData land = World.GetLandData(pos);
+            ILandObject parcel = World.LandChannel.GetLandObject(pos);
+            if (parcel == null)
+            {
+                return new LSL_List(0);
+            }
+
+            LandData land = parcel.LandData;
             if (land == null)
             {
                 return new LSL_List(0);
             }
+
             LSL_List ret = new LSL_List();
             foreach (object o in param.Data)
             {
@@ -14373,8 +14380,35 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                     case "5":
                         ret.Add(new LSL_Key(land.GlobalID.ToString()));
                         break;
+                    case "6":
+                        ret.Add(new LSL_Integer(land.SeeAVs ? 1 : 0));
+                        break;
+                    case "7":
+                        ret.Add(new LSL_Integer(parcel.GetParcelMaxPrimCount()));
+                        break;
+                    case "8":
+                        ret.Add(new LSL_Integer(parcel.PrimCounts.Total));
+                        break;
+                    case "9":
+                        ret.Add(new LSL_Vector(land.UserLocation));
+                        break;
+                    case "10":
+                        ret.Add(new LSL_Vector(land.UserLookAt));
+                        break;
+                    case "11":
+                        ret.Add(new LSL_Integer(land.LandingType));
+                        break;
+                    case "12":
+                        ret.Add(new LSL_Integer(land.Flags));
+                        break;
+                    case "13":
+                        ret.Add(new LSL_Integer(World.LSLScriptDanger(m_host, pos) ? 1 : 0));
+                        break;
                     case "64":
                         ret.Add(new LSL_Integer(land.Dwell));
+                        break;
+                    case "65":
+                        ret.Add(new LSL_Integer(land.ClaimDate));
                         break;
                     default:
                         ret.Add(new LSL_Integer(0));
@@ -17505,8 +17539,7 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
                 return String.Empty;
             }
 
-            UUID animID = presence.GetAnimationOverride(state);
-            if (animID.IsZero())
+            if (!presence.TryGetAnimationOverride(state, out UUID animID) || animID.IsZero())
                 return animState;
 
             foreach (KeyValuePair<string, UUID> kvp in DefaultAvatarAnimations.AnimsUUIDbyName)
