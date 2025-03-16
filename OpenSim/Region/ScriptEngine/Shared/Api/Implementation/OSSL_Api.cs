@@ -6639,5 +6639,21 @@ namespace OpenSim.Region.ScriptEngine.Shared.Api
             green = Math.Clamp(green, 0, 1.0f);
             return new LSL_Vector(red, green, 1.0f);
         }
+
+        public bool osGetTouchedBtn(LSL_Integer form,LSL_Vector pos, LSL_Vector a, LSL_Vector b, LSL_Vector c, LSL_Vector d)
+        {
+            /*
+            Button forms:
+            1 = rectangle
+            2 = circle
+            3 = eclipse
+            */
+            if (form == 1 && pos.x > a.x && pos.y > a.y && pos.x < b.x && pos.y < b.y)
+                return TRUE;
+            else if (form == 2 && LSL_Vector.MagSquare(a - pos) < LSL_Vector.MagSquare(a - b))
+                return TRUE;
+            else if (form == 2 && LSL_Vector.MagSquare(a - pos) < LSL_Vector.MagSquare(a - b) && LSL_Vector.MagSquare(a - pos) < LSL_Vector.MagSquare(a - c))
+                return TRUE;
+        }
     }
 }
